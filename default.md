@@ -96,6 +96,9 @@ Current coverage includes:
 ## 10) Legacy frontend backup
 - Original baseline snapshot (`v0-legacy`) is kept in:
   - `legacy/original-v0/`
+- Repository version policy:
+  - `main`: current version (web search, mobile optimization, CI/CD, Vercel deployment)
+  - `legacy/original-v0`: original baseline only
 
 ## 11) GitHub CI/CD + Vercel
 Added files:
