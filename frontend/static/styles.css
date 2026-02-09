@@ -63,6 +63,76 @@ body {
 .msg.assistant {
   align-self: flex-start;
   background: var(--assistant);
+  white-space: normal;
+}
+
+.msg.assistant.stream {
+  display: grid;
+  gap: 10px;
+}
+
+.assistant-section {
+  border: 1px solid rgba(16, 36, 62, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 8px 10px;
+}
+
+.assistant-section.reasoning {
+  border-style: dashed;
+}
+
+.assistant-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.assistant-body {
+  white-space: normal;
+  line-height: 1.55;
+}
+
+.assistant-body p,
+.assistant-body ul,
+.assistant-body ol,
+.assistant-body pre,
+.assistant-body blockquote {
+  margin: 0 0 0.7em;
+}
+
+.assistant-body p:last-child,
+.assistant-body ul:last-child,
+.assistant-body ol:last-child,
+.assistant-body pre:last-child,
+.assistant-body blockquote:last-child {
+  margin-bottom: 0;
+}
+
+.assistant-body code {
+  background: rgba(16, 36, 62, 0.12);
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.92em;
+}
+
+.assistant-body pre {
+  background: rgba(16, 36, 62, 0.1);
+  padding: 10px;
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.assistant-body pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.assistant-body strong {
+  font-weight: 700;
 }
 
 .composer {
@@ -110,7 +180,9 @@ button {
   cursor: pointer;
 }
 
-button:disabled {
+button:disabled,
+select:disabled,
+textarea:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

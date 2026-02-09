@@ -1,18 +1,7 @@
 import { streamChat } from "./api.js";
 
-function renderAssistant(reasoning, answer) {
-  const parts = [];
-  if (reasoning) {
-    parts.push("[Reasoning]\n" + reasoning);
-  }
-  if (answer) {
-    parts.push("[Answer]\n" + answer);
-  }
-  return parts.join("\n\n") || "思考中...";
-}
-
 export function bindChatComposer(ui, state) {
-  ui.addMessage("assistant", "已连接。请输入你的问题。");
+  ui.addMessage("assistant", "Connected. Ask your question.");
   ui.inputEl.focus();
 
   ui.formEl.addEventListener("submit", async (event) => {
@@ -26,7 +15,7 @@ export function bindChatComposer(ui, state) {
     ui.setPending(true);
 
     ui.addMessage("user", `[${model}]\n${text}`);
-    const pending = ui.addMessage("assistant", "思考中...");
+    const pending = ui.addAssistantStreamMessage();
 
     let answer = "";
     let reasoning = "";
@@ -39,29 +28,30 @@ export function bindChatComposer(ui, state) {
         onEvent: (evt) => {
           if (evt.type === "reasoning") {
             reasoning += evt.content || "";
-            ui.updateMessage(pending, renderAssistant(reasoning, answer));
+            ui.updateAssistantReasoning(pending, reasoning);
             return;
           }
 
           if (evt.type === "token") {
             answer += evt.content || "";
-            ui.updateMessage(pending, renderAssistant(reasoning, answer));
+            ui.updateAssistantAnswer(pending, answer);
             return;
           }
 
           if (evt.type === "error") {
-            throw new Error(evt.error || "流式请求失败");
+            throw new Error(evt.error || "Streaming request failed");
           }
         },
       });
 
       if (!answer) {
-        ui.updateMessage(pending, renderAssistant(reasoning, "(空响应)"));
+        answer = "(empty response)";
+        ui.updateAssistantAnswer(pending, answer);
       }
 
       state.appendTurn(text, answer);
     } catch (err) {
-      ui.updateMessage(pending, `错误: ${err.message}`);
+      ui.setAssistantStreamError(pending, err.message);
     } finally {
       ui.setPending(false);
       ui.inputEl.focus();

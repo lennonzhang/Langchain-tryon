@@ -25,11 +25,26 @@ python server.py
 ```
 Open `http://127.0.0.1:8000`.
 
-## 4) LangChain client style
+## 4) Frontend behavior (current)
+- Streaming chat UI is enabled by default in `frontend/index.html`.
+- Assistant messages support Markdown rendering and LaTeX formulas.
+- Streaming output is displayed in two sections:
+  - `Reasoning` (shown when reasoning tokens are present)
+  - `Answer` (main response body)
+- Rendering pipeline:
+  - `frontend/static/js/chat-controller.js`: receives stream events and routes partial output
+  - `frontend/static/js/messages.js`: manages stream message sections
+  - `frontend/static/js/render.js`: Markdown parsing + sanitization + MathJax typesetting
+- CDN assets loaded by `frontend/index.html`:
+  - `marked`
+  - `DOMPurify`
+  - `MathJax`
+
+## 5) LangChain client style
 Backend aligns with ChatNVIDIA standard usage:
 - `client = ChatNVIDIA(model="moonshotai/kimi-k2.5", api_key=..., temperature=1, top_p=1, max_completion_tokens=16384)`
 - `response = client.invoke([{"role":"user","content":"..."}])`
 
-## 5) API behavior
+## 6) API behavior
 - `POST /api/chat`: one-shot answer
 - `POST /api/chat/stream`: SSE streaming events (`token`, `done`, `error`)
