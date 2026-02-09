@@ -97,3 +97,34 @@ Current coverage includes:
 - Pre-mobile-optimization frontend snapshot is kept in:
   - `legacy/frontend/index.html`
   - `legacy/frontend/styles.css`
+
+## 11) GitHub CI/CD + Vercel
+Added files:
+- `.github/workflows/ci.yml`
+- `.github/workflows/vercel-deploy.yml`
+- `vercel.json`
+- `api/chat.py`
+- `api/chat/stream.py`
+
+Workflow behavior:
+- `CI`: runs backend unit tests on PR and pushes (`python -m unittest discover -s tests -v`).
+- `Vercel Deploy`:
+  - runs tests first
+  - non-main branches / PR: deploy preview
+  - `main` push: deploy production
+
+Required GitHub repository secrets:
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID`
+
+Required Vercel project environment variables:
+- `NVIDIA_API_KEY`
+- `NVIDIA_USE_SYSTEM_PROXY` (optional, default `0`)
+- `USER_AGENT` (recommended: `langchain-tryon/1.0`)
+
+Routing notes:
+- `/` -> `frontend/index.html`
+- `/static/*` -> `frontend/static/*`
+- `/api/chat` -> `api/chat.py`
+- `/api/chat/stream` -> `api/chat/stream.py`
