@@ -94,9 +94,8 @@ Current coverage includes:
 - streaming search/reasoning/token event behavior
 
 ## 10) Legacy frontend backup
-- Pre-mobile-optimization frontend snapshot is kept in:
-  - `legacy/frontend/index.html`
-  - `legacy/frontend/styles.css`
+- Original baseline snapshot (`v0-legacy`) is kept in:
+  - `legacy/original-v0/`
 
 ## 11) GitHub CI/CD + Vercel
 Added files:
