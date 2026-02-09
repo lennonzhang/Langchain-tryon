@@ -92,3 +92,8 @@ Current coverage includes:
 - WebBaseLoader fallback and SSL fallback paths
 - search flag propagation in handlers
 - streaming search/reasoning/token event behavior
+
+## 10) Legacy frontend backup
+- Pre-mobile-optimization frontend snapshot is kept in:
+  - `legacy/frontend/index.html`
+  - `legacy/frontend/styles.css`
