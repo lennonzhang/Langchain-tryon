@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1d4ed8" />
     <title>NVIDIA Streaming Chat</title>
     <link rel="stylesheet" href="/static/styles.css" />
 
@@ -24,7 +25,7 @@
   <body>
     <div class="wrap">
       <div class="chat">
-        <div class="header">Streaming Chat · NVIDIA</div>
+        <div class="header">NVIDIA Streaming Chat</div>
         <div id="messages" class="messages"></div>
         <form id="form" class="composer">
           <label class="model-field" for="modelSelect">
@@ -45,7 +46,7 @@
           ></textarea>
           <button id="sendBtn" type="submit">发送</button>
         </form>
-        <div class="tip">支持 Markdown 与 LaTeX 公式渲染，reasoning 与 answer 分区显示。</div>
+        <div class="tip">支持 Markdown 与 LaTeX 公式渲染，Search/Reasoning/Answer 分区显示。</div>
       </div>
     </div>
     <script type="module" src="/static/js/main.js"></script>
