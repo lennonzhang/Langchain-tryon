@@ -11,6 +11,9 @@ export function createUI() {
     if (refs.modelEl) {
       refs.modelEl.disabled = isPending;
     }
+    if (refs.searchToggleEl) {
+      refs.searchToggleEl.disabled = isPending;
+    }
   }
 
   return {

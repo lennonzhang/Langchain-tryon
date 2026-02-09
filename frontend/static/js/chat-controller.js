@@ -10,11 +10,13 @@ export function bindChatComposer(ui, state) {
     if (!text) return;
 
     const model = ui.modelEl?.value || "moonshotai/kimi-k2.5";
+    const webSearch = ui.searchToggleEl?.checked || false;
 
     ui.inputEl.value = "";
     ui.setPending(true);
 
-    ui.addMessage("user", `[${model}]\n${text}`);
+    const label = webSearch ? `[${model}] [搜索]\n${text}` : `[${model}]\n${text}`;
+    ui.addMessage("user", label);
     const pending = ui.addAssistantStreamMessage();
 
     let answer = "";
@@ -25,7 +27,21 @@ export function bindChatComposer(ui, state) {
         message: text,
         history: state.snapshot(),
         model,
+        webSearch,
         onEvent: (evt) => {
+          if (evt.type === "search_start") {
+            ui.updateAssistantSearchStart(pending, evt.query);
+            return;
+          }
+          if (evt.type === "search_done") {
+            ui.updateAssistantSearchDone(pending, evt.results);
+            return;
+          }
+          if (evt.type === "search_error") {
+            ui.updateAssistantSearchError(pending, evt.error);
+            return;
+          }
+
           if (evt.type === "reasoning") {
             reasoning += evt.content || "";
             ui.updateAssistantReasoning(pending, reasoning);

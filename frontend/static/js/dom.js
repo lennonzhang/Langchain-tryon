@@ -4,6 +4,7 @@ export function createDOMRefs() {
   const inputEl = document.getElementById("input");
   const sendBtnEl = document.getElementById("sendBtn");
   const modelEl = document.getElementById("modelSelect");
+  const searchToggleEl = document.getElementById("searchToggle");
 
   return {
     messagesEl,
@@ -11,5 +12,6 @@ export function createDOMRefs() {
     inputEl,
     sendBtnEl,
     modelEl,
+    searchToggleEl,
   };
 }

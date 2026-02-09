@@ -1,8 +1,8 @@
-export async function streamChat({ message, history, model, onEvent }) {
+export async function streamChat({ message, history, model, webSearch, onEvent }) {
   const resp = await fetch("/api/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history, model }),
+    body: JSON.stringify({ message, history, model, web_search: webSearch || false }),
   });
 
   if (!resp.ok) {

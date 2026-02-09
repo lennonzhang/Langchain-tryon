@@ -61,8 +61,13 @@ def _build_chat_model(api_key: str, model: str):
     return ChatNVIDIA(**params)
 
 
-def _build_messages(message: str, history: list) -> list[dict[str, str]]:
+def _build_messages(
+    message: str, history: list, search_context: str = ""
+) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
+
+    if search_context:
+        messages.append({"role": "system", "content": search_context})
 
     if isinstance(history, list):
         for item in history[-20:]:
@@ -96,10 +101,30 @@ def _extract_text(content) -> str:
     return "" if content is None else str(content)
 
 
-def chat_once(api_key: str, message: str, history: list, model: str | None = None) -> str:
+def _run_web_search(message: str):
+    """Execute web search and return (context_str, results_list) or ("", [])."""
+    from .web_search import format_search_context, web_search
+
+    results = web_search(message, num_results=5)
+    context = format_search_context(message, results)
+    return context, results
+
+
+def chat_once(
+    api_key: str,
+    message: str,
+    history: list,
+    model: str | None = None,
+    enable_search: bool = False,
+) -> str:
     chosen_model = resolve_model(model)
     client = _build_chat_model(api_key, chosen_model)
-    messages = _build_messages(message, history)
+
+    search_context = ""
+    if enable_search:
+        search_context, _ = _run_web_search(message)
+
+    messages = _build_messages(message, history, search_context)
 
     with _proxy_env_guard():
         response = client.invoke(messages)
@@ -107,10 +132,26 @@ def chat_once(api_key: str, message: str, history: list, model: str | None = Non
     return _extract_text(getattr(response, "content", ""))
 
 
-def stream_chat(api_key: str, message: str, history: list, model: str | None = None):
+def stream_chat(
+    api_key: str,
+    message: str,
+    history: list,
+    model: str | None = None,
+    enable_search: bool = False,
+):
     chosen_model = resolve_model(model)
     client = _build_chat_model(api_key, chosen_model)
-    messages = _build_messages(message, history)
+
+    search_context = ""
+    if enable_search:
+        yield {"type": "search_start", "query": message}
+        try:
+            search_context, results = _run_web_search(message)
+            yield {"type": "search_done", "results": results}
+        except Exception as exc:  # noqa: BLE001
+            yield {"type": "search_error", "error": str(exc)}
+
+    messages = _build_messages(message, history, search_context)
 
     stream_kwargs = {}
     if chosen_model.startswith("moonshotai/"):
