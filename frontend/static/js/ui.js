@@ -1,4 +1,4 @@
-﻿import { createDOMRefs } from "./dom.js";
+import { createDOMRefs } from "./dom.js";
 import { createMessageView } from "./messages.js";
 
 export function createUI() {
@@ -8,6 +8,9 @@ export function createUI() {
   function setPending(isPending) {
     refs.sendBtnEl.disabled = isPending;
     refs.inputEl.disabled = isPending;
+    if (refs.modelEl) {
+      refs.modelEl.disabled = isPending;
+    }
   }
 
   return {

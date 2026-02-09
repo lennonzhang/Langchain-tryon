@@ -1,17 +1,24 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kimi K2.5 Chat</title>
+    <title>NVIDIA Chat</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <div class="wrap">
       <div class="chat">
-        <div class="header">Basic Chat · moonshotai/kimi-k2.5</div>
+        <div class="header">Streaming Chat · NVIDIA</div>
         <div id="messages" class="messages"></div>
         <form id="form" class="composer">
+          <label class="model-field" for="modelSelect">
+            模型
+            <select id="modelSelect">
+              <option value="moonshotai/kimi-k2.5">moonshotai/kimi-k2.5</option>
+              <option value="z-ai/glm4.7">z-ai/glm4.7</option>
+            </select>
+          </label>
           <textarea
             id="input"
             placeholder="输入内容后回车发送（Shift+Enter 换行）"
@@ -19,7 +26,7 @@
           ></textarea>
           <button id="sendBtn" type="submit">发送</button>
         </form>
-        <div class="tip">流式输出已启用，回复会实时显示。</div>
+        <div class="tip">支持实时思考过程（reasoning）和正文流式输出。</div>
       </div>
     </div>
     <script type="module" src="/static/js/main.js"></script>

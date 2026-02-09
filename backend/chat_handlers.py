@@ -1,4 +1,4 @@
-﻿import json
+import json
 from urllib import error
 
 from .http_utils import init_sse, read_json_body, send_json, send_sse_event
@@ -14,12 +14,13 @@ def handle_chat_once(handler, api_key: str) -> None:
 
     message = str(data.get("message", "")).strip()
     history = data.get("history", [])
+    model = data.get("model")
     if not message:
         send_json(handler, 400, {"error": "message is required"})
         return
 
     try:
-        answer = chat_once(api_key, message, history)
+        answer = chat_once(api_key, message, history, model)
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
         send_json(handler, 502, {"error": "Upstream HTTP error", "detail": detail[:500]})
@@ -40,6 +41,7 @@ def handle_chat_stream(handler, api_key: str) -> None:
 
     message = str(data.get("message", "")).strip()
     history = data.get("history", [])
+    model = data.get("model")
     if not message:
         send_json(handler, 400, {"error": "message is required"})
         return
@@ -47,7 +49,7 @@ def handle_chat_stream(handler, api_key: str) -> None:
     init_sse(handler)
 
     try:
-        for event in stream_chat(api_key, message, history):
+        for event in stream_chat(api_key, message, history, model):
             send_sse_event(handler, event)
     except Exception as exc:  # noqa: BLE001
         try:

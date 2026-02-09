@@ -1,7 +1,7 @@
 import os
 from contextlib import contextmanager
 
-from .config import MODEL
+from .config import MODEL, resolve_model
 
 
 @contextmanager
@@ -33,7 +33,7 @@ def _proxy_env_guard():
                 os.environ[key] = value
 
 
-def _build_chat_model(api_key: str):
+def _build_chat_model(api_key: str, model: str):
     try:
         from langchain_nvidia_ai_endpoints import ChatNVIDIA
     except ImportError as exc:
@@ -41,13 +41,24 @@ def _build_chat_model(api_key: str):
             "LangChain NVIDIA package missing. Activate .venv and install requirements.txt first."
         ) from exc
 
-    return ChatNVIDIA(
-        model=MODEL,
-        api_key=api_key,
-        temperature=1,
-        top_p=1,
-        max_completion_tokens=16384,
-    )
+    params = {
+        "model": model,
+        "api_key": api_key,
+        "temperature": 1,
+        "top_p": 1,
+        "max_tokens": 16384,
+    }
+
+    # GLM prefers explicit thinking controls in request body.
+    if model.startswith("z-ai/"):
+        params["extra_body"] = {
+            "chat_template_kwargs": {
+                "enable_thinking": True,
+                "clear_thinking": False,
+            }
+        }
+
+    return ChatNVIDIA(**params)
 
 
 def _build_messages(message: str, history: list) -> list[dict[str, str]]:
@@ -85,8 +96,9 @@ def _extract_text(content) -> str:
     return "" if content is None else str(content)
 
 
-def chat_once(api_key: str, message: str, history: list) -> str:
-    client = _build_chat_model(api_key)
+def chat_once(api_key: str, message: str, history: list, model: str | None = None) -> str:
+    chosen_model = resolve_model(model)
+    client = _build_chat_model(api_key, chosen_model)
     messages = _build_messages(message, history)
 
     with _proxy_env_guard():
@@ -95,12 +107,22 @@ def chat_once(api_key: str, message: str, history: list) -> str:
     return _extract_text(getattr(response, "content", ""))
 
 
-def stream_chat(api_key: str, message: str, history: list):
-    client = _build_chat_model(api_key)
+def stream_chat(api_key: str, message: str, history: list, model: str | None = None):
+    chosen_model = resolve_model(model)
+    client = _build_chat_model(api_key, chosen_model)
     messages = _build_messages(message, history)
 
+    stream_kwargs = {}
+    if chosen_model.startswith("moonshotai/"):
+        stream_kwargs["chat_template_kwargs"] = {"thinking": True}
+
     with _proxy_env_guard():
-        for chunk in client.stream(messages):
+        for chunk in client.stream(messages, **stream_kwargs):
+            additional = getattr(chunk, "additional_kwargs", {}) or {}
+            reasoning = additional.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                yield {"type": "reasoning", "content": reasoning}
+
             token = _extract_text(getattr(chunk, "content", ""))
             if token:
                 yield {"type": "token", "content": token}

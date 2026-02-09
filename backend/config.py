@@ -4,6 +4,10 @@ from pathlib import Path
 
 API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 MODEL = "moonshotai/kimi-k2.5"
+SUPPORTED_MODELS = (
+    "moonshotai/kimi-k2.5",
+    "z-ai/glm4.7",
+)
 
 
 def _strip_quotes(value: str) -> str:
@@ -49,3 +53,9 @@ def load_api_key(base_dir: Path | None = None) -> str:
         return env_key
 
     raise RuntimeError("No API key found. Set NVIDIA_API_KEY in system env or .env.")
+
+
+def resolve_model(model: str | None) -> str:
+    if isinstance(model, str) and model in SUPPORTED_MODELS:
+        return model
+    return MODEL
