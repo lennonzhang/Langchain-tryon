@@ -44,38 +44,25 @@ def _build_chat_model(api_key: str):
     return ChatNVIDIA(
         model=MODEL,
         api_key=api_key,
-        max_tokens=8196,
-        temperature=1.0,
-        top_p=1.0,
+        temperature=1,
+        top_p=1,
+        max_completion_tokens=16384,
     )
 
 
-def _to_langchain_messages(message: str, history: list):
-    try:
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-    except ImportError as exc:
-        raise RuntimeError(
-            "LangChain core package missing. Activate .venv and install requirements.txt first."
-        ) from exc
+def _build_messages(message: str, history: list) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
 
-    messages = []
     if isinstance(history, list):
         for item in history[-20:]:
             if not isinstance(item, dict):
                 continue
             role = item.get("role")
             content = item.get("content")
-            if not isinstance(content, str):
-                continue
+            if role in {"user", "assistant", "system"} and isinstance(content, str):
+                messages.append({"role": role, "content": content})
 
-            if role == "user":
-                messages.append(HumanMessage(content=content))
-            elif role == "assistant":
-                messages.append(AIMessage(content=content))
-            elif role == "system":
-                messages.append(SystemMessage(content=content))
-
-    messages.append(HumanMessage(content=message))
+    messages.append({"role": "user", "content": message})
     return messages
 
 
@@ -99,21 +86,21 @@ def _extract_text(content) -> str:
 
 
 def chat_once(api_key: str, message: str, history: list) -> str:
-    llm = _build_chat_model(api_key)
-    messages = _to_langchain_messages(message, history)
+    client = _build_chat_model(api_key)
+    messages = _build_messages(message, history)
 
     with _proxy_env_guard():
-        response = llm.invoke(messages)
+        response = client.invoke(messages)
 
     return _extract_text(getattr(response, "content", ""))
 
 
 def stream_chat(api_key: str, message: str, history: list):
-    llm = _build_chat_model(api_key)
-    messages = _to_langchain_messages(message, history)
+    client = _build_chat_model(api_key)
+    messages = _build_messages(message, history)
 
     with _proxy_env_guard():
-        for chunk in llm.stream(messages):
+        for chunk in client.stream(messages):
             token = _extract_text(getattr(chunk, "content", ""))
             if token:
                 yield {"type": "token", "content": token}
