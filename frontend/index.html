@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f4c81" />
+    <meta name="theme-color" content="#113355" />
     <title>NVIDIA Streaming Chat</title>
     <link rel="stylesheet" href="/static/styles.css" />
 
@@ -25,40 +25,58 @@
   <body>
     <div class="wrap">
       <div class="chat">
-        <div class="header">NVIDIA Streaming Chat</div>
-        <div id="messages" class="messages"></div>
-        <form id="form" class="composer">
-          <label class="model-field" for="modelSelect">
-            模型
-            <select id="modelSelect">
-              <option value="moonshotai/kimi-k2.5">moonshotai/kimi-k2.5</option>
-              <option value="z-ai/glm4.7">z-ai/glm4.7</option>
-            </select>
-          </label>
+        <header class="header">
+          <div class="header-main">
+            <div class="header-kicker">LangChain + NVIDIA</div>
+            <h1>Streaming Chat Studio</h1>
+            <p>支持 Web Search、Thinking 与流式 Reasoning 展示。</p>
+          </div>
+          <div class="header-meta">
+            <span class="meta-pill">SSE Streaming</span>
+            <span class="meta-pill">Math + Markdown</span>
+            <span class="meta-pill">K2.5 / GLM4.7</span>
+          </div>
+        </header>
 
-          <div class="toggles" role="group" aria-label="chat options">
-            <label class="search-toggle" for="searchToggle">
-              <input type="checkbox" id="searchToggle" />
-              <span>网页搜索</span>
+        <div id="messages" class="messages"></div>
+
+        <form id="form" class="composer">
+          <div class="settings-card">
+            <label class="model-field" for="modelSelect">
+              模型
+              <select id="modelSelect">
+                <option value="moonshotai/kimi-k2.5">moonshotai/kimi-k2.5</option>
+                <option value="z-ai/glm4.7">z-ai/glm4.7</option>
+              </select>
             </label>
-            <label class="search-toggle" for="thinkingToggle" id="thinkingToggleWrap">
-              <input type="checkbox" id="thinkingToggle" checked />
-              <span>Thinking 模式（k2.5 / glm4.7）</span>
+
+            <div class="toggles" role="group" aria-label="chat options">
+              <label class="search-toggle" for="searchToggle">
+                <input type="checkbox" id="searchToggle" />
+                <span>网页搜索</span>
+              </label>
+              <label class="search-toggle" for="thinkingToggle" id="thinkingToggleWrap">
+                <input type="checkbox" id="thinkingToggle" checked />
+                <span>Thinking 模式（k2.5 / glm4.7）</span>
+              </label>
+            </div>
+
+            <label class="image-field" for="imageInput" id="imageInputWrap">
+              图片输入（仅 k2.5，最多 3 张）
+              <input id="imageInput" type="file" accept="image/*" multiple />
             </label>
           </div>
 
-          <label class="image-field" for="imageInput" id="imageInputWrap">
-            图片输入（仅 k2.5，最多 3 张）
-            <input id="imageInput" type="file" accept="image/*" multiple />
-          </label>
-
-          <textarea
-            id="input"
-            placeholder="输入内容后按 Enter 发送（Shift+Enter 换行）"
-            required
-          ></textarea>
-          <button id="sendBtn" type="submit">发送</button>
+          <div class="compose-row">
+            <textarea
+              id="input"
+              placeholder="输入内容后按 Enter 发送（Shift+Enter 换行）"
+              required
+            ></textarea>
+            <button id="sendBtn" type="submit">发送</button>
+          </div>
         </form>
+
         <div class="tip">
           两个模型最大生成 token 固定为 16384；k2.5 与 glm4.7 都支持 Thinking/Instant，图片输入仅 k2.5。
         </div>
