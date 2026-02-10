@@ -29,6 +29,8 @@ class TestChatHandlers(unittest.TestCase):
             [],
             "moonshotai/kimi-k2.5",
             enable_search=True,
+            thinking_mode=True,
+            images=[],
         )
         send_json_mock.assert_called_once_with(handler, 200, {"answer": "ok"})
 
@@ -58,8 +60,41 @@ class TestChatHandlers(unittest.TestCase):
             [],
             "moonshotai/kimi-k2.5",
             enable_search=True,
+            thinking_mode=True,
+            images=[],
         )
         self.assertEqual(send_sse_mock.call_count, 2)
+
+    def test_handle_chat_stream_passes_thinking_and_images(self):
+        events = [{"type": "done"}]
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={
+                    "message": "hello",
+                    "history": [],
+                    "model": "moonshotai/kimi-k2.5",
+                    "web_search": False,
+                    "thinking_mode": False,
+                    "images": ["data:image/png;base64,abcd"],
+                },
+            ),
+            patch("backend.chat_handlers.init_sse"),
+            patch("backend.chat_handlers.stream_chat", return_value=iter(events)) as stream_chat_mock,
+            patch("backend.chat_handlers.send_sse_event"),
+        ):
+            handle_chat_stream(handler, "api-key")
+
+        stream_chat_mock.assert_called_once_with(
+            "api-key",
+            "hello",
+            [],
+            "moonshotai/kimi-k2.5",
+            enable_search=False,
+            thinking_mode=False,
+            images=["data:image/png;base64,abcd"],
+        )
 
     def test_handle_chat_once_invalid_json(self):
         handler = object()
@@ -70,6 +105,44 @@ class TestChatHandlers(unittest.TestCase):
             handle_chat_once(handler, "api-key")
 
         send_json_mock.assert_called_once_with(handler, 400, {"error": "Invalid JSON body"})
+
+    def test_handle_chat_once_timeout_maps_to_504(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": []},
+            ),
+            patch("backend.chat_handlers.chat_once", side_effect=TimeoutError("timed out")),
+            patch("backend.chat_handlers.send_json") as send_json_mock,
+        ):
+            handle_chat_once(handler, "api-key")
+
+        send_json_mock.assert_called_once()
+        args = send_json_mock.call_args[0]
+        self.assertEqual(args[1], 504)
+        self.assertEqual(args[2]["error"], "Upstream request timeout")
+
+    def test_handle_chat_stream_gateway_timeout_emits_error_event(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": []},
+            ),
+            patch("backend.chat_handlers.init_sse"),
+            patch(
+                "backend.chat_handlers.stream_chat",
+                side_effect=Exception("Error: [504] Gateway Timeout"),
+            ),
+            patch("backend.chat_handlers.send_sse_event") as send_sse_mock,
+        ):
+            handle_chat_stream(handler, "api-key")
+
+        send_sse_mock.assert_called_once_with(
+            handler,
+            {"type": "error", "error": "Upstream gateway timeout"},
+        )
 
 
 if __name__ == "__main__":
