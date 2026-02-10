@@ -122,9 +122,9 @@ Added files:
 - `api/chat/stream.py`
 
 Workflow behavior:
-- `CI`: runs backend unit tests on PR and pushes (`python -m unittest discover -s tests -v`).
+- `CI`: runs backend unit tests and frontend build verification on PR and pushes.
 - `Vercel Deploy`:
-  - runs tests first
+  - runs backend tests and frontend build first
   - non-main branches / PR: deploy preview
   - `main` push: deploy production
 
@@ -143,3 +143,6 @@ Routing notes:
 - `/assets/*` -> `frontend/dist/assets/*`
 - `/api/chat` -> `api/chat.py`
 - `/api/chat/stream` -> `api/chat/stream.py`
+- `vercel.json` also defines:
+  - `installCommand`: `cd frontend-react && npm ci`
+  - `buildCommand`: `cd frontend-react && npm run build`
