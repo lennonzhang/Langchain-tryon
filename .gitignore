@@ -5,3 +5,4 @@
 .env.*
 !.env.example
 .vercel/
+.github/workflows/vercel-deploy.yml
