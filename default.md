@@ -30,26 +30,37 @@ python server.py
 ```
 Open `http://127.0.0.1:8000`.
 
-## 4) Frontend behavior (current)
-- Streaming chat UI is enabled by default in `frontend/index.html`.
-- Model selector now has a `Web Search` checkbox.
-- Assistant messages support Markdown rendering and LaTeX formulas.
-- Streaming output is displayed in three sections:
-  - `Search` (shown when web search is enabled)
-  - `Reasoning` (shown when reasoning tokens are present)
-  - `Answer` (main response body)
-- Rendering pipeline:
-  - `frontend/static/js/chat-controller.js`: reads search toggle and handles stream events (`search_start`, `search_done`, `search_error`, `reasoning`, `token`)
-  - `frontend/static/js/messages.js`: manages `Search` / `Reasoning` / `Answer` sections
-  - `frontend/static/js/render.js`: Markdown parsing + sanitization + MathJax typesetting
-- Search toggle wiring:
-  - `frontend/static/js/dom.js`: exposes `searchToggleEl`
-  - `frontend/static/js/ui.js`: disables search toggle while request is pending
-  - `frontend/static/js/api.js`: sends `web_search` in request body
-- CDN assets loaded by `frontend/index.html`:
-  - `marked`
-  - `DOMPurify`
-  - `MathJax`
+## 4) Frontend behavior (React + static build)
+- Frontend is refactored to React (`frontend-react/`) with Vite build output to `frontend/dist/`.
+- Backend serves static files from `frontend/dist` directly, so users can access frontend without running a separate frontend dev server.
+- Main frontend files:
+  - `frontend-react/src/App.jsx`: chat UI, streaming event handling, model/search/thinking/image controls
+  - `frontend-react/src/stream.js`: SSE parser for `data:` events
+  - `frontend-react/src/styles.css`: UI theme and motion effects
+- Assistant streaming sections remain:
+  - `Search`
+  - `Context Usage`
+  - `Reasoning`
+  - `Answer`
+- Rich rendering stack:
+  - `marked` + `DOMPurify` for markdown
+  - `MathJax` for formula rendering
+
+## 4.1) Frontend build commands
+From repository root:
+```powershell
+cd frontend-react
+npm install
+npm run build
+```
+Build output will be generated in `frontend/dist`.
+
+If `npm` is not available globally, use local portable node:
+```powershell
+$env:Path="D:\Code\Langchain-tryon\.tools\node-v20.11.1-win-x64;$env:Path"
+cd frontend-react
+npm.cmd run build
+```
 
 ## 5) LangChain client style
 Backend aligns with ChatNVIDIA standard usage:
@@ -78,9 +89,11 @@ Backend aligns with ChatNVIDIA standard usage:
 
 ## 8) Usage
 1. Install dependencies: `pip install -r requirements.txt`.
-2. Start server: `python server.py`.
-3. Open `http://127.0.0.1:8000`, check `Web Search`, then send message.
-4. Assistant panel shows: `Search` -> `Reasoning` -> `Answer`.
+2. Build frontend static assets: `cd frontend-react && npm install && npm run build`.
+3. Start backend server: `python server.py`.
+4. Open `http://127.0.0.1:8000`.
+5. Optional: check `Web Search`, then send message.
+6. Assistant panel shows: `Search` -> `Reasoning` -> `Answer`.
 
 ## 9) Backend tests
 Run:
@@ -97,7 +110,7 @@ Current coverage includes:
 - Original baseline snapshot (`v0-legacy`) is kept in:
   - `legacy/original-v0/`
 - Repository version policy:
-  - `main`: current version (web search, mobile optimization, CI/CD, Vercel deployment)
+  - `main`: current version (React frontend + static dist serving + backend features)
   - `legacy/original-v0`: original baseline only
 
 ## 11) GitHub CI/CD + Vercel
@@ -126,7 +139,7 @@ Required Vercel project environment variables:
 - `USER_AGENT` (recommended: `langchain-tryon/1.0`)
 
 Routing notes:
-- `/` -> `frontend/index.html`
-- `/static/*` -> `frontend/static/*`
+- `/` -> `frontend/dist/index.html`
+- `/assets/*` -> `frontend/dist/assets/*`
 - `/api/chat` -> `api/chat.py`
 - `/api/chat/stream` -> `api/chat/stream.py`

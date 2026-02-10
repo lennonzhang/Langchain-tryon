@@ -3,11 +3,11 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "/frontend/index.html"
+      "destination": "/frontend/dist/index.html"
     },
     {
-      "source": "/static/(.*)",
-      "destination": "/frontend/static/$1"
+      "source": "/assets/(.*)",
+      "destination": "/frontend/dist/assets/$1"
     }
   ],
   "functions": {
