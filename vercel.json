@@ -1,13 +1,23 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "cd frontend-react && npm ci",
+  "buildCommand": "cd frontend-react && npm run build",
   "rewrites": [
     {
-      "source": "/",
-      "destination": "/frontend/index.html"
+      "source": "/api/chat",
+      "destination": "/api/chat.py"
     },
     {
-      "source": "/static/(.*)",
-      "destination": "/frontend/static/$1"
+      "source": "/api/chat/stream",
+      "destination": "/api/chat/stream.py"
+    },
+    {
+      "source": "/assets/(.*)",
+      "destination": "/frontend/dist/assets/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/frontend/dist/index.html"
     }
   ],
   "functions": {
