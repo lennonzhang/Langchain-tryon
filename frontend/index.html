@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#1d4ed8" />
+    <meta name="theme-color" content="#0f4c81" />
     <title>NVIDIA Streaming Chat</title>
     <link rel="stylesheet" href="/static/styles.css" />
 
@@ -35,18 +35,33 @@
               <option value="z-ai/glm4.7">z-ai/glm4.7</option>
             </select>
           </label>
-          <label class="search-toggle" for="searchToggle">
-            <input type="checkbox" id="searchToggle" />
-            <span>网页搜索</span>
+
+          <div class="toggles" role="group" aria-label="chat options">
+            <label class="search-toggle" for="searchToggle">
+              <input type="checkbox" id="searchToggle" />
+              <span>网页搜索</span>
+            </label>
+            <label class="search-toggle" for="thinkingToggle" id="thinkingToggleWrap">
+              <input type="checkbox" id="thinkingToggle" checked />
+              <span>Thinking 模式（k2.5 / glm4.7）</span>
+            </label>
+          </div>
+
+          <label class="image-field" for="imageInput" id="imageInputWrap">
+            图片输入（仅 k2.5，最多 3 张）
+            <input id="imageInput" type="file" accept="image/*" multiple />
           </label>
+
           <textarea
             id="input"
-            placeholder="输入内容后回车发送（Shift+Enter 换行）"
+            placeholder="输入内容后按 Enter 发送（Shift+Enter 换行）"
             required
           ></textarea>
           <button id="sendBtn" type="submit">发送</button>
         </form>
-        <div class="tip">支持 Markdown 与 LaTeX 公式渲染，Search/Reasoning/Answer 分区显示。</div>
+        <div class="tip">
+          两个模型最大生成 token 固定为 16384；k2.5 与 glm4.7 都支持 Thinking/Instant，图片输入仅 k2.5。
+        </div>
       </div>
     </div>
     <script type="module" src="/static/js/main.js"></script>

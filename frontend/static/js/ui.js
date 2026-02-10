@@ -1,4 +1,4 @@
-import { createDOMRefs } from "./dom.js";
+﻿import { createDOMRefs } from "./dom.js";
 import { createMessageView } from "./messages.js";
 
 export function createUI() {
@@ -13,6 +13,12 @@ export function createUI() {
     }
     if (refs.searchToggleEl) {
       refs.searchToggleEl.disabled = isPending;
+    }
+    if (refs.thinkingToggleEl) {
+      refs.thinkingToggleEl.disabled = isPending;
+    }
+    if (refs.imageInputEl) {
+      refs.imageInputEl.disabled = isPending;
     }
   }
 
