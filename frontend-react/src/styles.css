@@ -465,6 +465,14 @@ textarea {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.input-shell.no-image {
+  grid-template-columns: 1fr;
+}
+
+.input-shell.no-image textarea {
+  grid-column: 1 / -1;
+}
+
 .input-shell:focus-within {
   border-color: #89afd8;
   box-shadow: 0 0 0 3px rgba(47, 127, 191, 0.15);

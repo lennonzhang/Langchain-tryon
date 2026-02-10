@@ -401,7 +401,7 @@ export default function App() {
           </div>
 
           <div className="compose-row">
-            <div className="input-shell">
+            <div className={`input-shell ${supportsImageInput ? "" : "no-image"}`.trim()}>
               {supportsImageInput && (
                 <button
                   type="button"
