@@ -32,20 +32,27 @@ Open `http://127.0.0.1:8000`.
 
 ## 4) Frontend behavior (current)
 - Streaming chat UI is enabled by default in `frontend/index.html`.
-- Model selector now has a `Web Search` checkbox.
+- Model selector supports:
+  - `moonshotai/kimi-k2.5`
+  - `z-ai/glm4.7`
+- Option toggles:
+  - `Web Search`
+  - `Thinking` (available for both `k2.5` and `glm4.7`)
+- Image input remains available only for `k2.5` (up to 3 images).
 - Assistant messages support Markdown rendering and LaTeX formulas.
-- Streaming output is displayed in three sections:
+- Streaming output is displayed in four sections:
   - `Search` (shown when web search is enabled)
+  - `Context Usage` (estimated context usage per request)
   - `Reasoning` (shown when reasoning tokens are present)
   - `Answer` (main response body)
 - Rendering pipeline:
-  - `frontend/static/js/chat-controller.js`: reads search toggle and handles stream events (`search_start`, `search_done`, `search_error`, `reasoning`, `token`)
-  - `frontend/static/js/messages.js`: manages `Search` / `Reasoning` / `Answer` sections
+  - `frontend/static/js/chat-controller.js`: reads model/search/thinking/image controls and handles stream events (`search_start`, `search_done`, `search_error`, `context_usage`, `reasoning`, `token`)
+  - `frontend/static/js/messages.js`: manages `Search` / `Context Usage` / `Reasoning` / `Answer` sections
   - `frontend/static/js/render.js`: Markdown parsing + sanitization + MathJax typesetting
-- Search toggle wiring:
+- Control wiring:
   - `frontend/static/js/dom.js`: exposes `searchToggleEl`
-  - `frontend/static/js/ui.js`: disables search toggle while request is pending
-  - `frontend/static/js/api.js`: sends `web_search` in request body
+  - `frontend/static/js/ui.js`: disables toggles/inputs while request is pending
+  - `frontend/static/js/api.js`: sends `web_search`, `thinking_mode`, `images` in request body
 - CDN assets loaded by `frontend/index.html`:
   - `marked`
   - `DOMPurify`
@@ -56,10 +63,22 @@ Backend aligns with ChatNVIDIA standard usage:
 - `client = ChatNVIDIA(model="moonshotai/kimi-k2.5", api_key=..., temperature=1, top_p=1, max_completion_tokens=16384)`
 - `response = client.invoke([{"role":"user","content":"..."}])`
 
+Thinking controls by model:
+- `moonshotai/kimi-k2.5`:
+  - request-time `chat_template_kwargs={"thinking": <bool>}`
+  - temperature policy: `Thinking=1.0`, `Instant=0.6`
+- `z-ai/glm4.7`:
+  - model init `extra_body={"chat_template_kwargs":{"enable_thinking": <bool>, "clear_thinking": <inverse bool>}}`
+  - reasoning stream is emitted only when `thinking_mode=true`
+
 ## 6) API behavior
 - `POST /api/chat`: one-shot answer
 - `POST /api/chat/stream`: SSE streaming events (`search_start`, `search_done`, `search_error`, `reasoning`, `token`, `done`, `error`)
-- Request body supports `web_search` (boolean). When enabled, backend tries DuckDuckGo search first, injects formatted results as a `system` message, then continues model generation.
+- Request body supports:
+  - `web_search` (boolean)
+  - `thinking_mode` (boolean, default `true`)
+  - `images` (array of data URLs, used by `k2.5` only)
+- When `web_search=true`, backend tries DuckDuckGo search first, injects formatted results as a `system` message, then continues model generation.
 - Search failure does not block model output. UI shows search error and answer stream continues.
 
 ## 7) Backend web search module
@@ -79,8 +98,8 @@ Backend aligns with ChatNVIDIA standard usage:
 ## 8) Usage
 1. Install dependencies: `pip install -r requirements.txt`.
 2. Start server: `python server.py`.
-3. Open `http://127.0.0.1:8000`, check `Web Search`, then send message.
-4. Assistant panel shows: `Search` -> `Reasoning` -> `Answer`.
+3. Open `http://127.0.0.1:8000`, choose model/options (`Web Search`, `Thinking`) and send message.
+4. Assistant panel shows: `Search` -> `Context Usage` -> `Reasoning` -> `Answer`.
 
 ## 9) Backend tests
 Run:
@@ -90,8 +109,9 @@ Run:
 Current coverage includes:
 - web search mapping and formatting
 - WebBaseLoader fallback and SSL fallback paths
-- search flag propagation in handlers
-- streaming search/reasoning/token event behavior
+- request flag propagation in handlers (`web_search`, `thinking_mode`, `images`)
+- streaming search/context-usage/reasoning/token event behavior
+- `glm4.7` thinking on/off payload behavior
 
 ## 10) Legacy frontend backup
 - Original baseline snapshot (`v0-legacy`) is kept in:
