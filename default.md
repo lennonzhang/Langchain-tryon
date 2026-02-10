@@ -146,3 +146,10 @@ Routing notes:
 - `vercel.json` also defines:
   - `installCommand`: `cd frontend-react && npm ci`
   - `buildCommand`: `cd frontend-react && npm run build`
+
+## 12) Change log (2026-02-10)
+- Frontend migrated to React + Vite (`frontend-react`), and static output is published to `frontend/dist`.
+- Backend static serving updated to use `frontend/dist` with SPA fallback behavior.
+- UI/UX upgraded with richer motion and improved visual hierarchy.
+- CI now validates both backend tests and frontend production build.
+- Vercel deployment is adapted to build React assets and route `/assets/*` + SPA fallback correctly.
