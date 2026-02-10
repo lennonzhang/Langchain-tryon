@@ -1,4 +1,4 @@
-﻿export function createDOMRefs() {
+export function createDOMRefs() {
   const messagesEl = document.getElementById("messages");
   const formEl = document.getElementById("form");
   const inputEl = document.getElementById("input");
@@ -7,8 +7,9 @@
   const searchToggleEl = document.getElementById("searchToggle");
   const thinkingToggleEl = document.getElementById("thinkingToggle");
   const thinkingToggleWrapEl = document.getElementById("thinkingToggleWrap");
+  const imagePickerBtnEl = document.getElementById("imagePickerBtn");
+  const imageCountBadgeEl = document.getElementById("imageCountBadge");
   const imageInputEl = document.getElementById("imageInput");
-  const imageInputWrapEl = document.getElementById("imageInputWrap");
 
   return {
     messagesEl,
@@ -19,7 +20,8 @@
     searchToggleEl,
     thinkingToggleEl,
     thinkingToggleWrapEl,
+    imagePickerBtnEl,
+    imageCountBadgeEl,
     imageInputEl,
-    imageInputWrapEl,
   };
 }

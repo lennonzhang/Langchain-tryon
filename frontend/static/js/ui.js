@@ -1,4 +1,4 @@
-﻿import { createDOMRefs } from "./dom.js";
+import { createDOMRefs } from "./dom.js";
 import { createMessageView } from "./messages.js";
 
 export function createUI() {
@@ -19,6 +19,9 @@ export function createUI() {
     }
     if (refs.imageInputEl) {
       refs.imageInputEl.disabled = isPending;
+    }
+    if (refs.imagePickerBtnEl) {
+      refs.imagePickerBtnEl.disabled = isPending;
     }
   }
 

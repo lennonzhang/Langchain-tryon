@@ -5,7 +5,10 @@ export function bindChatComposer(ui, state) {
   ui.inputEl.focus();
 
   syncModelSpecificControls(ui);
+  refreshImageBadge(ui);
   ui.modelEl?.addEventListener("change", () => syncModelSpecificControls(ui));
+  ui.imagePickerBtnEl?.addEventListener("click", () => ui.imageInputEl?.click());
+  ui.imageInputEl?.addEventListener("change", () => refreshImageBadge(ui));
 
   ui.formEl.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -90,6 +93,7 @@ export function bindChatComposer(ui, state) {
       state.appendTurn(text, answer);
       if (ui.imageInputEl) {
         ui.imageInputEl.value = "";
+        refreshImageBadge(ui);
       }
     } catch (err) {
       ui.setAssistantStreamError(pending, err.message);
@@ -114,14 +118,15 @@ function syncModelSpecificControls(ui) {
   if (ui.thinkingToggleWrapEl) {
     ui.thinkingToggleWrapEl.style.display = supportsThinking ? "inline-flex" : "none";
   }
-  if (ui.imageInputWrapEl) {
-    ui.imageInputWrapEl.style.display = supportsImageInput ? "flex" : "none";
+  if (ui.imagePickerBtnEl) {
+    ui.imagePickerBtnEl.style.display = supportsImageInput ? "inline-flex" : "none";
   }
   if (ui.thinkingToggleEl) {
     ui.thinkingToggleEl.checked = supportsThinking ? ui.thinkingToggleEl.checked : true;
   }
   if (!supportsImageInput && ui.imageInputEl) {
     ui.imageInputEl.value = "";
+    refreshImageBadge(ui);
   }
 }
 
@@ -131,6 +136,13 @@ function modelSupportsThinking(model) {
 
 function modelSupportsImageInput(model) {
   return model.startsWith("moonshotai/");
+}
+
+function refreshImageBadge(ui) {
+  if (!ui.imageCountBadgeEl) return;
+  const count = ui.imageInputEl?.files?.length || 0;
+  ui.imageCountBadgeEl.hidden = count <= 0;
+  ui.imageCountBadgeEl.textContent = String(Math.min(count, 3));
 }
 
 async function readImageInputAsDataUrls(inputEl) {

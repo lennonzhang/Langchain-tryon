@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0c3b66" />
+    <meta name="theme-color" content="#123b66" />
     <title>NVIDIA Streaming Chat</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -29,9 +29,6 @@
     <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   </head>
   <body>
-    <div class="bg-orb bg-orb-a" aria-hidden="true"></div>
-    <div class="bg-orb bg-orb-b" aria-hidden="true"></div>
-
     <div class="wrap">
       <div class="chat">
         <header class="header">
@@ -60,28 +57,38 @@
             </label>
 
             <div class="toggles" role="group" aria-label="chat options">
-              <label class="search-toggle" for="searchToggle">
+              <label class="toggle" for="searchToggle">
                 <input type="checkbox" id="searchToggle" />
-                <span>网页搜索</span>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span class="toggle-label">网页搜索</span>
               </label>
-              <label class="search-toggle" for="thinkingToggle" id="thinkingToggleWrap">
+              <label class="toggle" for="thinkingToggle" id="thinkingToggleWrap">
                 <input type="checkbox" id="thinkingToggle" checked />
-                <span>Thinking 模式（k2.5 / glm4.7）</span>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span class="toggle-label">Thinking 模式</span>
               </label>
             </div>
-
-            <label class="image-field" for="imageInput" id="imageInputWrap">
-              图片输入（仅 k2.5，最多 3 张）
-              <input id="imageInput" type="file" accept="image/*" multiple />
-            </label>
           </div>
 
           <div class="compose-row">
-            <textarea
-              id="input"
-              placeholder="输入内容后按 Enter 发送（Shift+Enter 换行）"
-              required
-            ></textarea>
+            <div class="input-shell">
+              <button
+                id="imagePickerBtn"
+                type="button"
+                class="image-picker-btn"
+                title="添加图片（仅 k2.5）"
+                aria-label="添加图片"
+              >
+                <span>+</span>
+                <em id="imageCountBadge" class="image-count-badge" hidden>0</em>
+              </button>
+              <textarea
+                id="input"
+                placeholder="输入内容后按 Enter 发送（Shift+Enter 换行）"
+                required
+              ></textarea>
+              <input id="imageInput" type="file" accept="image/*" multiple hidden />
+            </div>
             <button id="sendBtn" type="submit">发送</button>
           </div>
         </form>
