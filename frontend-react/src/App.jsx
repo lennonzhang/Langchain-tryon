@@ -39,6 +39,27 @@ function RichBlock({ text, className }) {
   return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
+function CollapsibleSection({ title, className, children, defaultOpen = true }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <div className={`assistant-section ${className} ${isOpen ? "is-open" : "is-closed"}`}>
+      <button
+        type="button"
+        className="section-toggle"
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-expanded={isOpen}
+      >
+        <span className="assistant-title">{title}</span>
+        <span className={`chevron ${isOpen ? "open" : ""}`} aria-hidden="true" />
+      </button>
+      <div className={`section-content ${isOpen ? "expanded" : "collapsed"}`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 async function readFilesAsDataUrls(fileList) {
   const files = Array.from(fileList || []).slice(0, 3);
   const tasks = files.map(
@@ -257,6 +278,7 @@ export default function App() {
     <div className={`wrap ${isPending ? "is-pending" : ""}`}>
       <div className="bg-orb orb-a" aria-hidden="true" />
       <div className="bg-orb orb-b" aria-hidden="true" />
+      <div className="bg-orb orb-c" aria-hidden="true" />
       <div className="bg-grid" aria-hidden="true" />
 
       <div className="chat">
@@ -284,11 +306,10 @@ export default function App() {
               return (
                 <div key={msg.id} className="msg assistant stream">
                   {msg.search.state !== "hidden" && (
-                    <div className="assistant-section search">
-                      <div className="assistant-title">Search</div>
+                    <CollapsibleSection title="Search" className="search" defaultOpen={true}>
                       <div className="assistant-body">
                         {msg.search.state === "loading" && (
-                          <span className="search-loading">正在搜索: “{msg.search.query}”...</span>
+                          <span className="search-loading">正在搜索: &ldquo;{msg.search.query}&rdquo;...</span>
                         )}
                         {msg.search.state === "error" && (
                           <span className="search-error">搜索失败: {msg.search.error}</span>
@@ -310,12 +331,11 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                    </div>
+                    </CollapsibleSection>
                   )}
 
                   {msg.usageLines.length > 0 && (
-                    <div className="assistant-section usage">
-                      <div className="assistant-title">Context Usage</div>
+                    <CollapsibleSection title="Context Usage" className="usage" defaultOpen={false}>
                       <div className="assistant-body">
                         {msg.usageLines.map((line, idx) => (
                           <div className="agent-loading" key={`${msg.id}-u-${idx}`}>
@@ -323,19 +343,25 @@ export default function App() {
                           </div>
                         ))}
                       </div>
-                    </div>
+                    </CollapsibleSection>
                   )}
 
                   {msg.reasoning && (
-                    <div className="assistant-section reasoning">
-                      <div className="assistant-title">Reasoning</div>
+                    <CollapsibleSection title="Reasoning" className="reasoning" defaultOpen={true}>
                       <RichBlock className="assistant-body" text={msg.reasoning} />
-                    </div>
+                    </CollapsibleSection>
                   )}
 
                   <div className="assistant-section answer">
                     <div className="assistant-title">Answer</div>
-                    <RichBlock className={`assistant-body ${isPending ? "typing" : ""}`} text={msg.answer} />
+                    <RichBlock className="assistant-body" text={msg.answer} />
+                    {isPending && (
+                      <span className="typing-dots" aria-label="正在输入">
+                        <span className="dot" />
+                        <span className="dot" />
+                        <span className="dot" />
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -443,7 +469,11 @@ export default function App() {
             </div>
 
             <button id="sendBtn" type="submit" disabled={isPending}>
-              发送
+              <span className="send-label">发送</span>
+              <svg className="send-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 2L11 13" />
+                <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+              </svg>
             </button>
           </div>
         </form>
