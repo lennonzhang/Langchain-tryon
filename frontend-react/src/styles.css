@@ -944,6 +944,35 @@ textarea {
   opacity: 0.7;
 }
 
+.attach-video-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.attach-video-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attach-video-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  pointer-events: none;
+  transition: background-color 0.15s ease;
+}
+
+.attach-thumb:hover .attach-video-play {
+  background: rgba(0, 0, 0, 0.45);
+}
+
 .attach-remove {
   position: absolute;
   top: 3px;

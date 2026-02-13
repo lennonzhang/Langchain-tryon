@@ -40,6 +40,54 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function extractVideoFrame(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+    video.playsInline = true;
+
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+
+    const drawFrame = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth || 160;
+        canvas.height = video.videoHeight || 90;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          finish("");
+          return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        finish(canvas.toDataURL("image/jpeg", 0.7));
+      } catch {
+        finish("");
+      }
+    };
+
+    video.addEventListener("error", () => {
+      finish("");
+    }, { once: true });
+
+    video.addEventListener("loadeddata", () => {
+      drawFrame();
+    }, { once: true });
+
+    // Prevent edge-case hangs when media metadata/data never becomes available.
+    setTimeout(() => finish(""), 2500);
+
+    video.src = url;
+  });
+}
+
 let _attachId = 0;
 function nextAttachId() {
   _attachId += 1;
@@ -201,7 +249,11 @@ export default function App() {
         try {
           const dataUrl = await readFileAsDataUrl(file);
           const type = file.type.startsWith("video/") ? "video" : "image";
-          newItems.push({ id: nextAttachId(), file, dataUrl, type, name: file.name });
+          let thumbUrl = "";
+          if (type === "video") {
+            thumbUrl = await extractVideoFrame(file);
+          }
+          newItems.push({ id: nextAttachId(), file, dataUrl, type, name: file.name, thumbUrl });
         } catch {
           // skip unreadable files
         }
@@ -507,6 +559,15 @@ export default function App() {
                     <div className="attach-thumb" key={att.id}>
                       {att.type === "image" ? (
                         <img src={att.dataUrl} alt={att.name} />
+                      ) : att.thumbUrl ? (
+                        <div className="attach-video-frame" title={att.name}>
+                          <img src={att.thumbUrl} alt={att.name} />
+                          <span className="attach-video-play" aria-hidden="true">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                              <polygon points="6 3 20 12 6 21 6 3" />
+                            </svg>
+                          </span>
+                        </div>
                       ) : (
                         <div className="attach-video-icon" title={att.name}>
                           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
