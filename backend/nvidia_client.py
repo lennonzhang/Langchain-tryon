@@ -39,11 +39,11 @@ def _output_tokens() -> int:
 
 def _normalize_media_data_urls(media) -> list[str]:
     """
-    Normalize image data URLs for multimodal chat.
+    Normalize media data URLs for multimodal chat.
 
     Notes:
-    - ChatNVIDIA currently supports image input but not video input.
-    - We therefore only forward `data:image/...;base64,...` payloads.
+    - We forward both image and video data URLs.
+    - Message assembly decides `image_url` vs `video_url` payload type.
     """
     if not isinstance(media, list):
         return []
@@ -53,7 +53,7 @@ def _normalize_media_data_urls(media) -> list[str]:
         if not isinstance(item, str):
             continue
         value = item.strip()
-        if not value.startswith("data:image/"):
+        if not (value.startswith("data:image/") or value.startswith("data:video/")):
             continue
         if ";base64," not in value:
             continue
@@ -134,7 +134,10 @@ def _build_user_content(model: str, message: str, media: list[str]):
 
     content = [{"type": "text", "text": message}]
     for url in media:
-        content.append({"type": "image_url", "image_url": {"url": url}})
+        if url.startswith("data:video/"):
+            content.append({"type": "video_url", "video_url": {"url": url}})
+        else:
+            content.append({"type": "image_url", "image_url": {"url": url}})
     return content
 
 
@@ -221,6 +224,9 @@ def _estimate_tokens_from_messages(messages: list[dict[str, str]]) -> int:
                     image_url = (part.get("image_url") or {}).get("url")
                     if isinstance(image_url, str):
                         total_chars += min(len(image_url), 256)
+                    video_url = (part.get("video_url") or {}).get("url")
+                    if isinstance(video_url, str):
+                        total_chars += min(len(video_url), 256)
             count += 1
 
     return max(1, total_chars // 4 + count * 4)

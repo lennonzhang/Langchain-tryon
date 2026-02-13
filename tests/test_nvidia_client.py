@@ -79,6 +79,22 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertEqual(user_content[0]["type"], "text")
         self.assertEqual(user_content[1]["type"], "image_url")
 
+    def test_build_messages_kimi_supports_image_and_video(self):
+        messages = _build_messages(
+            "moonshotai/kimi-k2.5",
+            "describe media",
+            [],
+            images=[
+                "data:image/png;base64,abcd",
+                "data:video/mp4;base64,efgh",
+            ],
+        )
+        user_content = messages[-1]["content"]
+        self.assertIsInstance(user_content, list)
+        self.assertEqual(user_content[0]["type"], "text")
+        self.assertEqual(user_content[1]["type"], "image_url")
+        self.assertEqual(user_content[2]["type"], "video_url")
+
     def test_build_messages_zai_ignores_images(self):
         messages = _build_messages(
             "z-ai/glm4.7",
@@ -88,7 +104,7 @@ class TestNvidiaClient(unittest.TestCase):
         )
         self.assertIsInstance(messages[-1]["content"], str)
 
-    def test_normalize_media_filters_invalid_and_video(self):
+    def test_normalize_media_filters_invalid(self):
         normalized = _normalize_media_data_urls(
             [
                 "data:image/png;base64,abcd",
@@ -100,7 +116,11 @@ class TestNvidiaClient(unittest.TestCase):
         )
         self.assertEqual(
             normalized,
-            ["data:image/png;base64,abcd", "data:image/jpeg;base64,xyz"],
+            [
+                "data:image/png;base64,abcd",
+                "data:video/mp4;base64,efgh",
+                "data:image/jpeg;base64,xyz",
+            ],
         )
 
     def test_chat_once_injects_search_context_when_enabled(self):
