@@ -1,17 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { parseEventStream } from "./stream";
 
 const MODELS = ["moonshotai/kimi-k2.5", "z-ai/glm4.7"];
+const MAX_ATTACHMENTS = 5;
 const CONNECTED_TEXT = "已连接，输入你的问题开始对话。";
 
 function modelSupportsThinking(model) {
   return model.startsWith("moonshotai/") || model.startsWith("z-ai/");
 }
 
-function modelSupportsImageInput(model) {
+function modelSupportsMediaInput(model) {
   return model.startsWith("moonshotai/");
+}
+
+function shortModelName(model) {
+  const idx = model.lastIndexOf("/");
+  return idx >= 0 ? model.slice(idx + 1) : model;
 }
 
 function toSafeHtml(source) {
@@ -25,14 +31,29 @@ function toSafeHtml(source) {
   return DOMPurify.sanitize(parsed, { USE_PROFILES: { html: true } });
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error(`Failed to read: ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+let _attachId = 0;
+function nextAttachId() {
+  _attachId += 1;
+  return _attachId;
+}
+
+/* ---- Sub-components ---- */
+
 function RichBlock({ text, className }) {
   const html = useMemo(() => toSafeHtml(text), [text]);
 
   useEffect(() => {
     if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
-      window.MathJax.typesetPromise().catch(() => {
-        // Keep markdown visible even if math rendering fails.
-      });
+      window.MathJax.typesetPromise().catch(() => {});
     }
   }, [html]);
 
@@ -60,20 +81,68 @@ function CollapsibleSection({ title, className, children, defaultOpen = true }) 
   );
 }
 
-async function readFilesAsDataUrls(fileList) {
-  const files = Array.from(fileList || []).slice(0, 3);
-  const tasks = files.map(
-    (file) =>
-      new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-        reader.onerror = () => reject(new Error(`Failed to read image: ${file.name}`));
-        reader.readAsDataURL(file);
-      })
+function ModelSelect({ models, value, disabled, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    function handleKey(e) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={`model-select ${open ? "is-open" : ""}`} ref={ref}>
+      <button
+        type="button"
+        className="model-trigger"
+        disabled={disabled}
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="model-trigger-label">{shortModelName(value)}</span>
+        <span className="model-trigger-arrow" aria-hidden="true" />
+      </button>
+      {open && (
+        <ul className="model-menu" role="listbox">
+          {models.map((m) => (
+            <li
+              key={m}
+              role="option"
+              aria-selected={m === value}
+              className={`model-option ${m === value ? "is-selected" : ""}`}
+              onClick={() => {
+                onChange(m);
+                setOpen(false);
+              }}
+            >
+              <span className="model-option-check" aria-hidden="true">
+                {m === value ? "✓" : ""}
+              </span>
+              <span className="model-option-text">
+                <span className="model-option-name">{shortModelName(m)}</span>
+                <span className="model-option-full">{m}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
-  const result = await Promise.all(tasks);
-  return result.filter(Boolean);
 }
+
+/* ---- Main App ---- */
 
 export default function App() {
   const fileInputRef = useRef(null);
@@ -87,17 +156,16 @@ export default function App() {
   const [webSearch, setWebSearch] = useState(false);
   const [thinkingMode, setThinkingMode] = useState(true);
   const [isPending, setPending] = useState(false);
-  const [imageCount, setImageCount] = useState(0);
+  const [attachments, setAttachments] = useState([]);
 
   const supportsThinking = modelSupportsThinking(model);
-  const supportsImageInput = modelSupportsImageInput(model);
+  const supportsMedia = modelSupportsMediaInput(model);
 
   useEffect(() => {
-    if (!supportsImageInput && fileInputRef.current) {
-      fileInputRef.current.value = "";
-      setImageCount(0);
+    if (!supportsMedia) {
+      setAttachments([]);
     }
-  }, [supportsImageInput]);
+  }, [supportsMedia]);
 
   useEffect(() => {
     if (messagesRef.current) {
@@ -114,33 +182,55 @@ export default function App() {
   function updateStreamMessage(streamId, updater) {
     setMessages((prev) =>
       prev.map((msg) => {
-        if (msg.id !== streamId || msg.role !== "assistant_stream") {
-          return msg;
-        }
+        if (msg.id !== streamId || msg.role !== "assistant_stream") return msg;
         return updater(msg);
       })
     );
   }
 
+  const handleFilesSelected = useCallback(
+    async (fileList) => {
+      const files = Array.from(fileList || []);
+      if (files.length === 0) return;
+
+      const remaining = MAX_ATTACHMENTS - attachments.length;
+      const batch = files.slice(0, Math.max(0, remaining));
+
+      const newItems = [];
+      for (const file of batch) {
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+          const type = file.type.startsWith("video/") ? "video" : "image";
+          newItems.push({ id: nextAttachId(), file, dataUrl, type, name: file.name });
+        } catch {
+          // skip unreadable files
+        }
+      }
+
+      if (newItems.length > 0) {
+        setAttachments((prev) => [...prev, ...newItems]);
+      }
+
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    [attachments.length]
+  );
+
+  function removeAttachment(id) {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
+
   async function onSubmit(event) {
     event.preventDefault();
     const text = input.trim();
-    if (!text || isPending) {
-      return;
-    }
+    if (!text || isPending) return;
 
     const effectiveThinking = supportsThinking ? thinkingMode : true;
-    const images = supportsImageInput ? await readFilesAsDataUrls(fileInputRef.current?.files) : [];
-    const tags = [model];
-    if (webSearch) {
-      tags.push("Search");
-    }
-    if (supportsThinking) {
-      tags.push(effectiveThinking ? "Thinking" : "Instant");
-    }
-    if (supportsImageInput && images.length > 0) {
-      tags.push(`Img x${images.length}`);
-    }
+    const mediaUrls = supportsMedia ? attachments.map((a) => a.dataUrl) : [];
+    const tags = [shortModelName(model)];
+    if (webSearch) tags.push("Search");
+    if (supportsThinking) tags.push(effectiveThinking ? "Thinking" : "Instant");
+    if (mediaUrls.length > 0) tags.push(`Media x${mediaUrls.length}`);
 
     const userId = nextId();
     const streamId = nextId();
@@ -158,6 +248,7 @@ export default function App() {
     ]);
 
     setInput("");
+    setAttachments([]);
     setPending(true);
 
     let answer = "";
@@ -171,7 +262,7 @@ export default function App() {
           model,
           web_search: webSearch,
           thinking_mode: effectiveThinking,
-          images
+          images: mediaUrls
         })
       });
 
@@ -180,14 +271,10 @@ export default function App() {
         try {
           const err = await resp.json();
           detail = err.error || detail;
-        } catch {
-          // Keep fallback message when server doesn't return JSON.
-        }
+        } catch {}
         throw new Error(detail);
       }
-      if (!resp.body) {
-        throw new Error("浏览器不支持流式读取");
-      }
+      if (!resp.body) throw new Error("浏览器不支持流式读取");
 
       await parseEventStream(resp.body.getReader(), (evt) => {
         if (evt.type === "search_start") {
@@ -212,12 +299,7 @@ export default function App() {
         if (evt.type === "search_error") {
           updateStreamMessage(streamId, (msg) => ({
             ...msg,
-            search: {
-              state: "error",
-              query: msg.search.query,
-              results: [],
-              error: evt.error || ""
-            }
+            search: { state: "error", query: msg.search.query, results: [], error: evt.error || "" }
           }));
           return;
         }
@@ -228,8 +310,8 @@ export default function App() {
           const total = Number(usage.window_total_tokens || 0);
           const ratio = Number(usage.usage_ratio || 0);
           const pct = (ratio * 100).toFixed(2);
-          const modelName = usage.model ? ` - ${usage.model}` : "";
-          const line = `[${phase}] ${used}/${total} tokens (${pct}%)${modelName}`;
+          const mn = usage.model ? ` - ${usage.model}` : "";
+          const line = `[${phase}] ${used}/${total} tokens (${pct}%)${mn}`;
           updateStreamMessage(streamId, (msg) => ({
             ...msg,
             usageLines: [...msg.usageLines, line]
@@ -262,10 +344,6 @@ export default function App() {
       }
 
       setHistory((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: answer }]);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-      setImageCount(0);
     } catch (error) {
       const message = error instanceof Error ? error.message : "请求失败";
       updateStreamMessage(streamId, (msg) => ({ ...msg, answer: `Error: ${message}` }));
@@ -381,21 +459,15 @@ export default function App() {
 
         <form className="composer" onSubmit={onSubmit}>
           <div className="settings-card">
-            <label className="model-field" htmlFor="modelSelect">
-              模型
-              <select
-                id="modelSelect"
+            <div className="model-field">
+              <span className="model-field-label">模型</span>
+              <ModelSelect
+                models={MODELS}
                 value={model}
                 disabled={isPending}
-                onChange={(event) => setModel(event.target.value)}
-              >
-                {MODELS.map((item) => (
-                  <option value={item} key={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={setModel}
+              />
+            </div>
 
             <div className="toggles" role="group" aria-label="chat options">
               <label className="toggle" htmlFor="searchToggle">
@@ -427,19 +499,63 @@ export default function App() {
           </div>
 
           <div className="compose-row">
-            <div className={`input-shell ${supportsImageInput ? "" : "no-image"}`.trim()}>
-              {supportsImageInput && (
-                <button
-                  type="button"
-                  className="image-picker-btn"
-                  disabled={isPending}
-                  title="添加图片（仅 k2.5）"
-                  aria-label="添加图片"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <span>+</span>
-                  {imageCount > 0 && <em className="image-count-badge">{Math.min(imageCount, 3)}</em>}
-                </button>
+            <div className="input-shell">
+              {/* Attachment strip */}
+              {supportsMedia && (attachments.length > 0 || true) && (
+                <div className="attach-strip">
+                  {attachments.map((att) => (
+                    <div className="attach-thumb" key={att.id}>
+                      {att.type === "image" ? (
+                        <img src={att.dataUrl} alt={att.name} />
+                      ) : (
+                        <div className="attach-video-icon" title={att.name}>
+                          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                          </svg>
+                          <span className="attach-video-name">{att.name}</span>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="attach-remove"
+                        onClick={() => removeAttachment(att.id)}
+                        aria-label={`删除 ${att.name}`}
+                        disabled={isPending}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                          <line x1="2" y1="2" x2="8" y2="8" />
+                          <line x1="8" y1="2" x2="2" y2="8" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+
+                  {attachments.length < MAX_ATTACHMENTS && (
+                    <button
+                      type="button"
+                      className="attach-add-btn"
+                      disabled={isPending}
+                      title="添加图片或视频"
+                      aria-label="添加文件"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                    </button>
+                  )}
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    hidden
+                    disabled={isPending}
+                    onChange={(event) => handleFilesSelected(event.target.files)}
+                  />
+                </div>
               )}
 
               <textarea
@@ -456,16 +572,6 @@ export default function App() {
                   }
                 }}
               />
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                hidden
-                disabled={isPending}
-                onChange={(event) => setImageCount(event.target.files?.length || 0)}
-              />
             </div>
 
             <button id="sendBtn" type="submit" disabled={isPending}>
@@ -479,7 +585,7 @@ export default function App() {
         </form>
 
         <div className="tip">
-          两个模型最大生成 token 固定为 16384；k2.5 与 glm4.7 均支持 Thinking/Instant，图片输入仅 k2.5。
+          两个模型最大生成 token 固定为 16384；k2.5 与 glm4.7 均支持 Thinking/Instant，图片/视频输入仅 k2.5。
         </div>
       </div>
     </div>

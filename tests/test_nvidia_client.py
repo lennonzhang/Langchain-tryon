@@ -1,11 +1,13 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+import types
+import sys
 
 from backend.nvidia_client import (
     _build_chat_model,
     _build_messages,
-    _normalize_image_data_urls,
+    _normalize_media_data_urls,
     chat_once,
     stream_chat,
 )
@@ -34,7 +36,10 @@ class FakeClient:
 
 class TestNvidiaClient(unittest.TestCase):
     def test_build_chat_model_zai_thinking_on(self):
-        with patch("langchain_nvidia_ai_endpoints.ChatNVIDIA") as chat_cls:
+        fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
+        chat_cls = unittest.mock.Mock()
+        fake_module.ChatNVIDIA = chat_cls
+        with patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}):
             _build_chat_model("api-key", "z-ai/glm4.7", thinking_mode=True)
 
         kwargs = chat_cls.call_args.kwargs
@@ -42,7 +47,10 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertEqual(kwargs["extra_body"]["chat_template_kwargs"]["clear_thinking"], False)
 
     def test_build_chat_model_zai_thinking_off(self):
-        with patch("langchain_nvidia_ai_endpoints.ChatNVIDIA") as chat_cls:
+        fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
+        chat_cls = unittest.mock.Mock()
+        fake_module.ChatNVIDIA = chat_cls
+        with patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}):
             _build_chat_model("api-key", "z-ai/glm4.7", thinking_mode=False)
 
         kwargs = chat_cls.call_args.kwargs
@@ -80,16 +88,20 @@ class TestNvidiaClient(unittest.TestCase):
         )
         self.assertIsInstance(messages[-1]["content"], str)
 
-    def test_normalize_images_filters_invalid(self):
-        normalized = _normalize_image_data_urls(
+    def test_normalize_media_filters_invalid_and_video(self):
+        normalized = _normalize_media_data_urls(
             [
                 "data:image/png;base64,abcd",
+                "data:video/mp4;base64,efgh",
                 "http://bad",
                 123,
                 "data:image/jpeg;base64,xyz",
             ]
         )
-        self.assertEqual(normalized, ["data:image/png;base64,abcd"])
+        self.assertEqual(
+            normalized,
+            ["data:image/png;base64,abcd", "data:image/jpeg;base64,xyz"],
+        )
 
     def test_chat_once_injects_search_context_when_enabled(self):
         fake_client = FakeClient(invoke_content="final answer")

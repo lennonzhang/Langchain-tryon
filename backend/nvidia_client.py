@@ -37,12 +37,19 @@ def _output_tokens() -> int:
     return min(requested, _MAX_COMPLETION_TOKENS_LIMIT)
 
 
-def _normalize_image_data_urls(images) -> list[str]:
-    if not isinstance(images, list):
+def _normalize_media_data_urls(media) -> list[str]:
+    """
+    Normalize image data URLs for multimodal chat.
+
+    Notes:
+    - ChatNVIDIA currently supports image input but not video input.
+    - We therefore only forward `data:image/...;base64,...` payloads.
+    """
+    if not isinstance(media, list):
         return []
 
     normalized = []
-    for item in images[:3]:
+    for item in media[:5]:
         if not isinstance(item, str):
             continue
         value = item.strip()
@@ -52,6 +59,11 @@ def _normalize_image_data_urls(images) -> list[str]:
             continue
         normalized.append(value)
     return normalized
+
+
+def _normalize_image_data_urls(images) -> list[str]:
+    """Backward-compatible alias used by older tests/callers."""
+    return _normalize_media_data_urls(images)
 
 
 @contextmanager
@@ -116,12 +128,12 @@ def _build_chat_model(api_key: str, model: str, thinking_mode: bool = True):
     return ChatNVIDIA(**params)
 
 
-def _build_user_content(model: str, message: str, images: list[str]):
-    if not _supports_images(model) or not images:
+def _build_user_content(model: str, message: str, media: list[str]):
+    if not _supports_images(model) or not media:
         return message
 
     content = [{"type": "text", "text": message}]
-    for url in images:
+    for url in media:
         content.append({"type": "image_url", "image_url": {"url": url}})
     return content
 
@@ -260,7 +272,7 @@ def chat_once(
     if enable_search:
         search_context, _ = _run_web_search(message)
 
-    normalized_images = _normalize_image_data_urls(images)
+    normalized_images = _normalize_media_data_urls(images)
     messages = _build_messages(chosen_model, message, history, search_context, normalized_images)
 
     with _proxy_env_guard():
@@ -293,7 +305,7 @@ def stream_chat(
         except Exception as exc:  # noqa: BLE001
             yield {"type": "search_error", "error": str(exc)}
 
-    normalized_images = _normalize_image_data_urls(images)
+    normalized_images = _normalize_media_data_urls(images)
     messages = _build_messages(chosen_model, message, history, search_context, normalized_images)
 
     stream_kwargs = _stream_or_invoke_kwargs(chosen_model, thinking_mode)
