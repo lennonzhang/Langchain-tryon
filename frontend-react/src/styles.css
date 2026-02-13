@@ -849,32 +849,32 @@ textarea {
   color: var(--ink);
 }
 
-/* ---- Compose row / input ---- */
-
-.compose-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-}
+/* ---- Input shell ---- */
 
 .input-shell {
   display: flex;
   flex-direction: column;
   gap: 0;
   border: 1.5px solid rgba(203, 213, 225, 0.7);
-  border-radius: var(--radius-md);
+  border-radius: 16px;
   background: #fff;
-  padding: 8px 10px;
+  padding: 10px 12px 8px;
   box-shadow: var(--shadow-xs);
   transition: border-color 0.25s ease,
               box-shadow 0.25s ease,
-              transform 0.2s ease;
+              transform 0.2s var(--ease-spring);
 }
 
 .input-shell:focus-within {
   border-color: var(--brand-2);
   box-shadow: 0 0 0 3px var(--brand-glow), var(--shadow-sm);
   transform: translateY(-1px);
+}
+
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 /* ---- Attachment strip ---- */
@@ -1034,50 +1034,56 @@ textarea {
 }
 
 textarea {
-  resize: vertical;
-  width: 100%;
-  min-height: 46px;
+  flex: 1;
+  resize: none;
+  min-height: 24px;
   max-height: 180px;
-  padding: 6px 2px 6px 0;
+  padding: 4px 0;
   border: 0;
   outline: 0;
+  line-height: 1.5;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
 }
 
-/* ---- Send button ---- */
+/* ---- Send button (inside input-shell) ---- */
 
 #sendBtn {
-  min-height: 46px;
-  min-width: 120px;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 50%;
   background: linear-gradient(135deg, var(--brand-2), var(--accent));
   background-size: 200% 200%;
   color: #fff;
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.02em;
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  padding: 0;
+  margin-bottom: 1px;
   transition: transform 0.2s var(--ease-spring),
-              filter 0.2s ease,
               background-position 0.4s ease,
-              box-shadow 0.2s ease;
+              box-shadow 0.25s ease,
+              opacity 0.2s ease;
+}
+
+#sendBtn:not(:disabled) {
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
 }
 
 #sendBtn:hover:not(:disabled) {
   background-position: 100% 100%;
-  transform: translateY(-2px);
-  filter: brightness(1.05);
-  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.25);
+  transform: scale(1.1);
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.35);
 }
 
 #sendBtn:active:not(:disabled) {
-  transform: scale(0.96) translateY(0);
+  transform: scale(0.9);
   transition: transform 0.08s ease;
 }
 
@@ -1086,7 +1092,7 @@ textarea {
   content: "";
   position: absolute;
   inset: -40% -20%;
-  background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.25), transparent 70%);
+  background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.3), transparent 70%);
   transform: translateX(-100%);
   transition: transform 0.5s ease;
 }
@@ -1103,10 +1109,6 @@ textarea {
 
 #sendBtn:hover:not(:disabled) .send-icon {
   transform: translate(2px, -2px);
-}
-
-.send-label {
-  font-weight: 700;
 }
 
 /* ---- Disabled states ---- */
@@ -1397,14 +1399,6 @@ input:disabled {
     bottom: 0;
     z-index: 11;
     padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-  }
-
-  .compose-row {
-    grid-template-columns: 1fr;
-  }
-
-  #sendBtn {
-    width: 100%;
   }
 
   .model-menu {
