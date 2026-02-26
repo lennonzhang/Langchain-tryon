@@ -1,4 +1,5 @@
 import os
+import re
 from contextlib import contextmanager
 
 from .config import resolve_model
@@ -9,6 +10,7 @@ _MODEL_CONTEXT_WINDOW = {
     "z-ai/glm5": 128000,
 }
 _MAX_COMPLETION_TOKENS_LIMIT = 16384
+_AGENT_MAX_STEPS = 3
 
 
 def _int_env(name: str, default: int, min_value: int) -> int:
@@ -186,6 +188,14 @@ def _supports_images(model: str) -> bool:
     return model.startswith("moonshotai/")
 
 
+def _is_agentic_model(model: str) -> bool:
+    return model.startswith("qwen/") or model.startswith("z-ai/")
+
+
+def _should_use_agentic_flow(model: str, enable_search: bool) -> bool:
+    return _is_agentic_model(model) and bool(enable_search)
+
+
 def _stream_or_invoke_kwargs(model: str, thinking_mode: bool) -> dict:
     kwargs = {"max_completion_tokens": _output_tokens()}
     if model.startswith("moonshotai/"):
@@ -275,6 +285,105 @@ def _run_web_search(
     return context, results
 
 
+def _agent_system_prompt(enable_search: bool) -> str:
+    tool_block = (
+        "- web_search: Search the web for up-to-date information.\n"
+        "  Action Input should be a concise search query.\n"
+    )
+    if not enable_search:
+        tool_block = "- No tools are available."
+
+    return (
+        "You are an agent that follows ReAct.\n"
+        "At each step, output EXACTLY this format:\n"
+        "Thought: <short reasoning>\n"
+        "Action: <tool name or final>\n"
+        "Action Input: <tool input or final answer>\n"
+        "Rules:\n"
+        "- If enough information is available, use Action: final.\n"
+        "- If a tool fails, continue with best-effort answer.\n"
+        "- Do not output markdown code fences.\n"
+        "Tools:\n"
+        f"{tool_block}"
+    )
+
+
+def _extract_react_fields(content: str) -> tuple[str, str]:
+    text = content.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        text = text.strip()
+
+    action_match = re.search(r"(?im)^Action:\s*(.+?)\s*$", text)
+    input_match = re.search(r"(?ims)^Action Input:\s*(.+)$", text)
+    action = action_match.group(1).strip().lower() if action_match else ""
+    action_input = input_match.group(1).strip() if input_match else ""
+    return action, action_input
+
+
+def _build_agent_messages(
+    model: str,
+    message: str,
+    history: list,
+    scratchpad: str,
+    images: list[str] | None,
+    enable_search: bool,
+) -> list[dict]:
+    messages = [{"role": "system", "content": _agent_system_prompt(enable_search)}]
+    messages.extend(_build_messages(model, message, history, "", images))
+    if scratchpad:
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Previous steps and observations:\n{scratchpad}",
+            }
+        )
+    return messages
+
+
+def _extract_reasoning(additional_kwargs: dict) -> str:
+    reasoning = additional_kwargs.get("reasoning_content")
+    if isinstance(reasoning, str):
+        return reasoning
+    return ""
+
+
+def _agent_step(
+    client,
+    model: str,
+    message: str,
+    history: list,
+    scratchpad: str,
+    thinking_mode: bool,
+    images: list[str] | None,
+    enable_search: bool,
+):
+    messages = _build_agent_messages(
+        model=model,
+        message=message,
+        history=history,
+        scratchpad=scratchpad,
+        images=images,
+        enable_search=enable_search,
+    )
+    response = client.invoke(
+        messages,
+        **_stream_or_invoke_kwargs(model, thinking_mode),
+    )
+    content = _extract_text(getattr(response, "content", ""))
+    additional = getattr(response, "additional_kwargs", {}) or {}
+    reasoning = _extract_reasoning(additional)
+    action, action_input = _extract_react_fields(content)
+    return {
+        "messages": messages,
+        "content": content,
+        "reasoning": reasoning,
+        "action": action,
+        "action_input": action_input,
+    }
+
+
 def chat_once(
     api_key: str,
     message: str,
@@ -286,13 +395,63 @@ def chat_once(
 ) -> str:
     chosen_model = resolve_model(model)
     client = _build_chat_model(api_key, chosen_model, thinking_mode=thinking_mode)
+    initial_search_context = ""
 
-    search_context = ""
     if enable_search:
-        search_context, _ = _run_web_search(message)
+        initial_search_context, _ = _run_web_search(message)
+
+    if _should_use_agentic_flow(chosen_model, enable_search):
+        scratchpad = (
+            f"\nInitial search observation:\n{initial_search_context}\n"
+            if initial_search_context
+            else ""
+        )
+        final_answer = ""
+        with _proxy_env_guard():
+            for step in range(_AGENT_MAX_STEPS):
+                step_result = _agent_step(
+                    client=client,
+                    model=chosen_model,
+                    message=message,
+                    history=history,
+                    scratchpad=scratchpad,
+                    thinking_mode=thinking_mode,
+                    images=None,
+                    enable_search=enable_search,
+                )
+                action = step_result["action"]
+                action_input = step_result["action_input"]
+                content = step_result["content"]
+
+                if action == "final":
+                    final_answer = action_input or content
+                    break
+
+                if action == "web_search" and action_input:
+                    try:
+                        context, _ = _run_web_search(action_input)
+                        observation = context or "No useful search results."
+                    except Exception as exc:  # noqa: BLE001
+                        observation = f"Search error: {exc}"
+                    scratchpad += (
+                        f"\nStep {step + 1} output:\n{content}\n"
+                        f"Observation:\n{observation}\n"
+                    )
+                    continue
+
+                final_answer = action_input or content
+                break
+
+        return final_answer.strip()
 
     normalized_images = _normalize_media_data_urls(images)
-    messages = _build_messages(chosen_model, message, history, search_context, normalized_images)
+    messages = _build_messages(
+        chosen_model,
+        message,
+        history,
+        initial_search_context,
+        normalized_images,
+    )
 
     with _proxy_env_guard():
         response = client.invoke(
@@ -314,21 +473,90 @@ def stream_chat(
 ):
     chosen_model = resolve_model(model)
     client = _build_chat_model(api_key, chosen_model, thinking_mode=thinking_mode)
+    emit_reasoning = _supports_thinking(chosen_model) and bool(thinking_mode)
+    initial_search_context = ""
 
-    search_context = ""
     if enable_search:
         yield {"type": "search_start", "query": message}
         try:
-            search_context, results = _run_web_search(message)
+            initial_search_context, results = _run_web_search(message)
             yield {"type": "search_done", "results": results}
         except Exception as exc:  # noqa: BLE001
             yield {"type": "search_error", "error": str(exc)}
 
+    if _should_use_agentic_flow(chosen_model, enable_search):
+        scratchpad = (
+            f"\nInitial search observation:\n{initial_search_context}\n"
+            if initial_search_context
+            else ""
+        )
+        final_answer = ""
+        with _proxy_env_guard():
+            for step in range(_AGENT_MAX_STEPS):
+                step_result = _agent_step(
+                    client=client,
+                    model=chosen_model,
+                    message=message,
+                    history=history,
+                    scratchpad=scratchpad,
+                    thinking_mode=thinking_mode,
+                    images=None,
+                    enable_search=enable_search,
+                )
+
+                yield {
+                    "type": "context_usage",
+                    "usage": _context_usage_payload(
+                        chosen_model,
+                        f"agent_step_{step + 1}",
+                        step_result["messages"],
+                    ),
+                }
+
+                if emit_reasoning and step_result["reasoning"]:
+                    yield {"type": "reasoning", "content": step_result["reasoning"]}
+
+                action = step_result["action"]
+                action_input = step_result["action_input"]
+                content = step_result["content"]
+
+                if action == "final":
+                    final_answer = (action_input or content).strip()
+                    break
+
+                if action == "web_search" and action_input:
+                    yield {"type": "search_start", "query": action_input}
+                    try:
+                        context, results = _run_web_search(action_input)
+                        yield {"type": "search_done", "results": results}
+                        observation = context or "No useful search results."
+                    except Exception as exc:  # noqa: BLE001
+                        yield {"type": "search_error", "error": str(exc)}
+                        observation = f"Search error: {exc}"
+                    scratchpad += (
+                        f"\nStep {step + 1} output:\n{content}\n"
+                        f"Observation:\n{observation}\n"
+                    )
+                    continue
+
+                final_answer = (action_input or content).strip()
+                break
+
+        if final_answer:
+            yield {"type": "token", "content": final_answer}
+        yield {"type": "done", "finish_reason": "stop"}
+        return
+
     normalized_images = _normalize_media_data_urls(images)
-    messages = _build_messages(chosen_model, message, history, search_context, normalized_images)
+    messages = _build_messages(
+        chosen_model,
+        message,
+        history,
+        initial_search_context,
+        normalized_images,
+    )
 
     stream_kwargs = _stream_or_invoke_kwargs(chosen_model, thinking_mode)
-    emit_reasoning = _supports_thinking(chosen_model) and bool(thinking_mode)
 
     with _proxy_env_guard():
         yield {
