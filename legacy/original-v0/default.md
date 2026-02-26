@@ -3,6 +3,7 @@
 ## Version baseline
 - `webp2` code has been copied into this repo as the migration baseline.
 - Continue development on this repo for LangChain-based backend.
+- Current tooling baseline for active development: Node `22.22.0` and pnpm `10+`.
 
 ## 1) Create local venv
 ```powershell
