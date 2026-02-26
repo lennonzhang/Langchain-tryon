@@ -3,6 +3,9 @@
 ## Python version
 Use Python 3.12 for this project.
 
+## Node and package manager baseline
+Use Node `22.22.0` and pnpm `10+` for all frontend tasks in this repository.
+
 ## 1) Create local venv (py3.12)
 ```powershell
 py -3.12 -m venv .venv
@@ -57,16 +60,15 @@ Open `http://127.0.0.1:8000`.
 From repository root:
 ```powershell
 cd frontend-react
-npm install
-npm run build
+pnpm install
+pnpm run build
 ```
 Build output will be generated in `frontend/dist`.
 
-If `npm` is not available globally, use local portable node:
+Quick version check:
 ```powershell
-$env:Path="D:\Code\Langchain-tryon\.tools\node-v20.11.1-win-x64;$env:Path"
-cd frontend-react
-npm.cmd run build
+node -v   # v22.22.0
+pnpm -v   # 10+
 ```
 
 ## 5) LangChain client style
@@ -108,7 +110,7 @@ Thinking controls by model:
 
 ## 8) Usage
 1. Install dependencies: `pip install -r requirements.txt`.
-2. Build frontend static assets: `cd frontend-react && npm install && npm run build`.
+2. Build frontend static assets: `cd frontend-react && pnpm install && pnpm run build`.
 3. Start backend server: `python server.py`.
 4. Open `http://127.0.0.1:8000`.
 5. Choose model/options (`Web Search`, `Thinking`) and send message.
@@ -164,8 +166,8 @@ Routing notes:
 - `/api/chat` -> `api/chat.py`
 - `/api/chat/stream` -> `api/chat/stream.py`
 - `vercel.json` also defines:
-  - `installCommand`: `cd frontend-react && npm ci`
-  - `buildCommand`: `cd frontend-react && npm run build`
+  - `installCommand`: `cd frontend-react && pnpm install --frozen-lockfile`
+  - `buildCommand`: `cd frontend-react && pnpm run build`
 
 ## 12) Change log (2026-02-10)
 - Frontend migrated to React + Vite (`frontend-react`), and static output is published to `frontend/dist`.

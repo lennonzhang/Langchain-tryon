@@ -37,21 +37,33 @@ def _output_tokens() -> int:
     return min(requested, _MAX_COMPLETION_TOKENS_LIMIT)
 
 
-def _normalize_image_data_urls(images) -> list[str]:
-    if not isinstance(images, list):
+def _normalize_media_data_urls(media) -> list[str]:
+    """
+    Normalize media data URLs for multimodal chat.
+
+    Notes:
+    - We forward both image and video data URLs.
+    - Message assembly decides `image_url` vs `video_url` payload type.
+    """
+    if not isinstance(media, list):
         return []
 
     normalized = []
-    for item in images[:3]:
+    for item in media[:5]:
         if not isinstance(item, str):
             continue
         value = item.strip()
-        if not value.startswith("data:image/"):
+        if not (value.startswith("data:image/") or value.startswith("data:video/")):
             continue
         if ";base64," not in value:
             continue
         normalized.append(value)
     return normalized
+
+
+def _normalize_image_data_urls(images) -> list[str]:
+    """Backward-compatible alias used by older tests/callers."""
+    return _normalize_media_data_urls(images)
 
 
 @contextmanager
@@ -116,13 +128,16 @@ def _build_chat_model(api_key: str, model: str, thinking_mode: bool = True):
     return ChatNVIDIA(**params)
 
 
-def _build_user_content(model: str, message: str, images: list[str]):
-    if not _supports_images(model) or not images:
+def _build_user_content(model: str, message: str, media: list[str]):
+    if not _supports_images(model) or not media:
         return message
 
     content = [{"type": "text", "text": message}]
-    for url in images:
-        content.append({"type": "image_url", "image_url": {"url": url}})
+    for url in media:
+        if url.startswith("data:video/"):
+            content.append({"type": "video_url", "video_url": {"url": url}})
+        else:
+            content.append({"type": "image_url", "image_url": {"url": url}})
     return content
 
 
@@ -209,6 +224,9 @@ def _estimate_tokens_from_messages(messages: list[dict[str, str]]) -> int:
                     image_url = (part.get("image_url") or {}).get("url")
                     if isinstance(image_url, str):
                         total_chars += min(len(image_url), 256)
+                    video_url = (part.get("video_url") or {}).get("url")
+                    if isinstance(video_url, str):
+                        total_chars += min(len(video_url), 256)
             count += 1
 
     return max(1, total_chars // 4 + count * 4)
@@ -260,7 +278,7 @@ def chat_once(
     if enable_search:
         search_context, _ = _run_web_search(message)
 
-    normalized_images = _normalize_image_data_urls(images)
+    normalized_images = _normalize_media_data_urls(images)
     messages = _build_messages(chosen_model, message, history, search_context, normalized_images)
 
     with _proxy_env_guard():
@@ -293,7 +311,7 @@ def stream_chat(
         except Exception as exc:  # noqa: BLE001
             yield {"type": "search_error", "error": str(exc)}
 
-    normalized_images = _normalize_image_data_urls(images)
+    normalized_images = _normalize_media_data_urls(images)
     messages = _build_messages(chosen_model, message, history, search_context, normalized_images)
 
     stream_kwargs = _stream_or_invoke_kwargs(chosen_model, thinking_mode)

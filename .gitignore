@@ -10,3 +10,4 @@ scripts/list_chatnvidia_models.py
 scripts/models-*.txt
 .tools/
 frontend-react/node_modules/
+frontend-react/preview*.log
