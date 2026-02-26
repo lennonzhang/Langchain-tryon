@@ -5,7 +5,8 @@ from .config import resolve_model
 
 _MODEL_CONTEXT_WINDOW = {
     "moonshotai/kimi-k2.5": 131072,
-    "z-ai/glm4.7": 128000,
+    "qwen/qwen3.5-397b-a17b": 128000,
+    "z-ai/glm5": 128000,
 }
 _MAX_COMPLETION_TOKENS_LIMIT = 16384
 
@@ -105,14 +106,20 @@ def _build_chat_model(api_key: str, model: str, thinking_mode: bool = True):
 
     timeout_seconds = _float_env("NVIDIA_TIMEOUT_SECONDS", 300.0, 30.0)
     temperature = 1.0
+    top_p = 1.0
     if model.startswith("moonshotai/"):
         temperature = 1.0 if thinking_mode else 0.6
+    elif model.startswith("qwen/"):
+        temperature = 0.6
+        top_p = 0.95
+    elif model.startswith("z-ai/"):
+        temperature = 0.7
 
     params = {
         "model": model,
         "api_key": api_key,
         "temperature": temperature,
-        "top_p": 1,
+        "top_p": top_p,
         "max_completion_tokens": _output_tokens(),
         "timeout": timeout_seconds,
     }
@@ -168,7 +175,11 @@ def _build_messages(
 
 
 def _supports_thinking(model: str) -> bool:
-    return model.startswith("moonshotai/") or model.startswith("z-ai/")
+    return (
+        model.startswith("moonshotai/")
+        or model.startswith("qwen/")
+        or model.startswith("z-ai/")
+    )
 
 
 def _supports_images(model: str) -> bool:
@@ -179,6 +190,8 @@ def _stream_or_invoke_kwargs(model: str, thinking_mode: bool) -> dict:
     kwargs = {"max_completion_tokens": _output_tokens()}
     if model.startswith("moonshotai/"):
         kwargs["chat_template_kwargs"] = {"thinking": bool(thinking_mode)}
+    elif model.startswith("qwen/"):
+        kwargs["chat_template_kwargs"] = {"enable_thinking": bool(thinking_mode)}
     return kwargs
 
 

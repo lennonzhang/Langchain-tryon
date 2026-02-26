@@ -47,10 +47,11 @@ Open `http://127.0.0.1:8000`.
   - `Answer`
 - Model selector supports:
   - `moonshotai/kimi-k2.5`
-  - `z-ai/glm4.7`
+  - `qwen/qwen3.5-397b-a17b`
+  - `z-ai/glm5`
 - Option toggles:
   - `Web Search`
-  - `Thinking` (available for both `k2.5` and `glm4.7`)
+  - `Thinking` (available for `k2.5`, `qwen3.5`, and `glm5`)
 - Image input is available for `k2.5` only (up to 3 images).
 - Rich rendering stack:
   - `marked` + `DOMPurify` for markdown
@@ -75,22 +76,31 @@ pnpm -v   # 10+
 Backend aligns with ChatNVIDIA standard usage:
 - `client = ChatNVIDIA(model="moonshotai/kimi-k2.5", api_key=..., temperature=1, top_p=1, max_completion_tokens=16384)`
 - `response = client.invoke([{"role":"user","content":"..."}])`
+- `qwen/qwen3.5-397b-a17b` reasoning stream style:
+  - `for chunk in client.stream(msgs, chat_template_kwargs={"enable_thinking": True}): ...`
+  - read `chunk.additional_kwargs["reasoning_content"]` when present
 
 Thinking controls by model:
 - `moonshotai/kimi-k2.5`:
   - request-time `chat_template_kwargs={"thinking": <bool>}`
   - temperature policy: `Thinking=1.0`, `Instant=0.6`
-- `z-ai/glm4.7`:
+- `qwen/qwen3.5-397b-a17b`:
+  - request-time `chat_template_kwargs={"enable_thinking": <bool>}`
+  - recommended params: `temperature=0.6`, `top_p=0.95`
+- `z-ai/glm5`:
   - model init `extra_body={"chat_template_kwargs":{"enable_thinking": <bool>, "clear_thinking": <inverse bool>}}`
   - reasoning stream is emitted only when `thinking_mode=true`
 
 ## 6) API behavior
 - `POST /api/chat`: one-shot answer
 - `POST /api/chat/stream`: SSE streaming events (`search_start`, `search_done`, `search_error`, `reasoning`, `token`, `done`, `error`)
+- Default interaction mode is streaming (`/api/chat/stream`).
 - Request body supports:
   - `web_search` (boolean)
   - `thinking_mode` (boolean, default `true`)
   - `images` (array of data URLs, used by `k2.5` only)
+- Agent implementation rule:
+  - If a model supports reasoning, request and surface reasoning (`reasoning` SSE events) when `thinking_mode=true`.
 - When `web_search=true`, backend tries DuckDuckGo search first, injects formatted results as a `system` message, then continues model generation.
 - Search failure does not block model output. UI shows search error and answer stream continues.
 
@@ -126,7 +136,7 @@ Current coverage includes:
 - WebBaseLoader fallback and SSL fallback paths
 - request flag propagation in handlers (`web_search`, `thinking_mode`, `images`)
 - streaming search/context-usage/reasoning/token event behavior
-- `glm4.7` thinking on/off payload behavior
+- `glm5` thinking on/off payload behavior
 
 ## 10) Legacy frontend backup
 - Original baseline snapshot (`v0-legacy`) is kept in:

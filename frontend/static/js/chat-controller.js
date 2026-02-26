@@ -131,7 +131,7 @@ function syncModelSpecificControls(ui) {
 }
 
 function modelSupportsThinking(model) {
-  return model.startsWith("moonshotai/") || model.startsWith("z-ai/");
+  return model.startsWith("moonshotai/") || model.startsWith("qwen/") || model.startsWith("z-ai/");
 }
 
 function modelSupportsImageInput(model) {

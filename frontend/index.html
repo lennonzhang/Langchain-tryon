@@ -40,7 +40,7 @@
           <div class="header-meta">
             <span class="meta-pill">SSE Streaming</span>
             <span class="meta-pill">Math + Markdown</span>
-            <span class="meta-pill">K2.5 / GLM4.7</span>
+            <span class="meta-pill">K2.5 / QWEN3.5 / GLM5</span>
           </div>
         </header>
 
@@ -52,7 +52,8 @@
               模型
               <select id="modelSelect">
                 <option value="moonshotai/kimi-k2.5">moonshotai/kimi-k2.5</option>
-                <option value="z-ai/glm4.7">z-ai/glm4.7</option>
+                <option value="qwen/qwen3.5-397b-a17b">qwen/qwen3.5-397b-a17b</option>
+                <option value="z-ai/glm5">z-ai/glm5</option>
               </select>
             </label>
 
@@ -94,7 +95,7 @@
         </form>
 
         <div class="tip">
-          两个模型最大生成 token 固定为 16384；k2.5 与 glm4.7 都支持 Thinking/Instant，图片输入仅 k2.5。
+          三个模型最大生成 token 固定为 16384；k2.5、qwen3.5 与 glm5 都支持 Thinking/Instant，图片输入仅 k2.5。
         </div>
       </div>
     </div>

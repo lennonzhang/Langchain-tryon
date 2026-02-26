@@ -40,7 +40,7 @@ class TestNvidiaClient(unittest.TestCase):
         chat_cls = unittest.mock.Mock()
         fake_module.ChatNVIDIA = chat_cls
         with patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}):
-            _build_chat_model("api-key", "z-ai/glm4.7", thinking_mode=True)
+            _build_chat_model("api-key", "z-ai/glm5", thinking_mode=True)
 
         kwargs = chat_cls.call_args.kwargs
         self.assertEqual(kwargs["extra_body"]["chat_template_kwargs"]["enable_thinking"], True)
@@ -51,11 +51,22 @@ class TestNvidiaClient(unittest.TestCase):
         chat_cls = unittest.mock.Mock()
         fake_module.ChatNVIDIA = chat_cls
         with patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}):
-            _build_chat_model("api-key", "z-ai/glm4.7", thinking_mode=False)
+            _build_chat_model("api-key", "z-ai/glm5", thinking_mode=False)
 
         kwargs = chat_cls.call_args.kwargs
         self.assertEqual(kwargs["extra_body"]["chat_template_kwargs"]["enable_thinking"], False)
         self.assertEqual(kwargs["extra_body"]["chat_template_kwargs"]["clear_thinking"], True)
+
+    def test_build_chat_model_qwen_defaults(self):
+        fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
+        chat_cls = unittest.mock.Mock()
+        fake_module.ChatNVIDIA = chat_cls
+        with patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}):
+            _build_chat_model("api-key", "qwen/qwen3.5-397b-a17b", thinking_mode=True)
+
+        kwargs = chat_cls.call_args.kwargs
+        self.assertEqual(kwargs["temperature"], 0.6)
+        self.assertEqual(kwargs["top_p"], 0.95)
 
     def test_build_messages_includes_search_context_first(self):
         messages = _build_messages(
@@ -97,7 +108,7 @@ class TestNvidiaClient(unittest.TestCase):
 
     def test_build_messages_zai_ignores_images(self):
         messages = _build_messages(
-            "z-ai/glm4.7",
+            "z-ai/glm5",
             "describe image",
             [],
             images=["data:image/png;base64,abcd"],
@@ -206,7 +217,7 @@ class TestNvidiaClient(unittest.TestCase):
         )
 
         with (
-            patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm4.7"),
+            patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm5"),
             patch("backend.nvidia_client._build_chat_model", return_value=fake_client) as build_model_mock,
         ):
             events = list(
@@ -221,12 +232,49 @@ class TestNvidiaClient(unittest.TestCase):
 
         build_model_mock.assert_called_once_with(
             "api-key",
-            "z-ai/glm4.7",
+            "z-ai/glm5",
             thinking_mode=False,
         )
         self.assertIn({"type": "token", "content": "ok"}, events)
         self.assertFalse(any(evt.get("type") == "reasoning" for evt in events))
         self.assertEqual(fake_client.stream_kwargs, {"max_completion_tokens": 16384})
+
+    def test_stream_chat_qwen_thinking_on_emits_reasoning(self):
+        fake_client = FakeClient(
+            chunks=[
+                SimpleNamespace(
+                    content="ok",
+                    additional_kwargs={"reasoning_content": "think-qwen"},
+                )
+            ]
+        )
+
+        with (
+            patch(
+                "backend.nvidia_client.resolve_model",
+                return_value="qwen/qwen3.5-397b-a17b",
+            ),
+            patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
+        ):
+            events = list(
+                stream_chat(
+                    "api-key",
+                    "question",
+                    [],
+                    enable_search=False,
+                    thinking_mode=True,
+                )
+            )
+
+        self.assertIn({"type": "reasoning", "content": "think-qwen"}, events)
+        self.assertIn({"type": "token", "content": "ok"}, events)
+        self.assertEqual(
+            fake_client.stream_kwargs,
+            {
+                "max_completion_tokens": 16384,
+                "chat_template_kwargs": {"enable_thinking": True},
+            },
+        )
 
     def test_stream_chat_search_error_does_not_block_answer(self):
         chunks = [SimpleNamespace(content="token-ok", additional_kwargs={})]

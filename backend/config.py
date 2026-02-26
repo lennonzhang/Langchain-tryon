@@ -6,7 +6,8 @@ API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 MODEL = "moonshotai/kimi-k2.5"
 SUPPORTED_MODELS = (
     "moonshotai/kimi-k2.5",
-    "z-ai/glm4.7",
+    "qwen/qwen3.5-397b-a17b",
+    "z-ai/glm5",
 )
 
 

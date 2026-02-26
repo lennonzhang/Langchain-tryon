@@ -3,12 +3,12 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { parseEventStream } from "./stream";
 
-const MODELS = ["moonshotai/kimi-k2.5", "z-ai/glm4.7"];
+const MODELS = ["moonshotai/kimi-k2.5", "qwen/qwen3.5-397b-a17b", "z-ai/glm5"];
 const MAX_ATTACHMENTS = 5;
 const CONNECTED_TEXT = "已连接，输入你的问题开始对话。";
 
 function modelSupportsThinking(model) {
-  return model.startsWith("moonshotai/") || model.startsWith("z-ai/");
+  return model.startsWith("moonshotai/") || model.startsWith("qwen/") || model.startsWith("z-ai/");
 }
 
 function modelSupportsMediaInput(model) {
@@ -421,7 +421,7 @@ export default function App() {
           <div className="header-meta">
             <span className="meta-pill">SSE Streaming</span>
             <span className="meta-pill">Math + Markdown</span>
-            <span className="meta-pill">K2.5 / GLM4.7</span>
+            <span className="meta-pill">K2.5 / QWEN3.5 / GLM5</span>
           </div>
         </header>
 
@@ -644,7 +644,7 @@ export default function App() {
         </form>
 
         <div className="tip">
-          两个模型最大生成 token 固定为 16384；k2.5 与 glm4.7 均支持 Thinking/Instant，图片/视频输入仅 k2.5。
+          三个模型最大生成 token 固定为 16384；k2.5、qwen3.5 与 glm5 均支持 Thinking/Instant，图片/视频输入仅 k2.5。
         </div>
       </div>
     </div>

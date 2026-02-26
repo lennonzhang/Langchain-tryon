@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 Full-stack AI chat application using a Python/LangChain backend with NVIDIA AI endpoints and a React frontend. Supports streaming responses (SSE), web search, multimodal input (images/video), and thinking mode. Deployed on Vercel (serverless) or run locally via a built-in Python HTTP server.
+Default chat path is streaming (`/api/chat/stream`).
 
 ## Commands
 
@@ -66,7 +67,11 @@ api/chat/stream.py  -> wraps backend/chat_handlers.py
 ## Models
 
 - `moonshotai/kimi-k2.5` (default): images, video, thinking mode (temp 1.0 with thinking, 0.6 without)
-- `z-ai/glm4.7`: thinking mode only (temp 0.7 always)
+- `qwen/qwen3.5-397b-a17b`: thinking mode supported (`chat_template_kwargs.enable_thinking`), reasoning from `additional_kwargs.reasoning_content`
+- `z-ai/glm5`: thinking mode only (temp 0.7 always)
+
+Model capability rule:
+- If a selected model supports reasoning, backend/frontend must expose reasoning output in stream mode.
 
 ## Environment Variables
 
