@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "cd frontend-react && pnpm install --frozen-lockfile",
-  "buildCommand": "cd frontend-react && pnpm run build",
+  "installCommand": "corepack enable && corepack prepare pnpm@10.0.0 --activate && cd frontend-react && pnpm install --frozen-lockfile",
+  "buildCommand": "corepack enable && corepack prepare pnpm@10.0.0 --activate && cd frontend-react && pnpm run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
