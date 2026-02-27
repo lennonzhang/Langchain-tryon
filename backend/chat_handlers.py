@@ -11,11 +11,16 @@ def _is_gateway_timeout_error(exc: Exception) -> bool:
 
 
 def _parse_chat_payload(data: dict) -> dict:
+    agent_mode = data.get("agent_mode", None)
+    if not isinstance(agent_mode, bool):
+        agent_mode = None
+
     return {
         "message": str(data.get("message", "")).strip(),
         "history": data.get("history", []),
         "model": data.get("model"),
         "enable_search": bool(data.get("web_search", False)),
+        "agent_mode": agent_mode,
         "thinking_mode": bool(data.get("thinking_mode", True)),
         "images": data.get("images", []),
     }
@@ -41,6 +46,7 @@ def handle_chat_once(handler, api_key: str) -> None:
             payload["history"],
             payload["model"],
             enable_search=payload["enable_search"],
+            agent_mode=payload["agent_mode"],
             thinking_mode=payload["thinking_mode"],
             images=payload["images"],
         )
@@ -91,6 +97,7 @@ def handle_chat_stream(handler, api_key: str) -> None:
             payload["history"],
             payload["model"],
             enable_search=payload["enable_search"],
+            agent_mode=payload["agent_mode"],
             thinking_mode=payload["thinking_mode"],
             images=payload["images"],
         ):

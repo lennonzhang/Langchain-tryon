@@ -97,10 +97,14 @@ Thinking controls by model:
 - Default interaction mode is streaming (`/api/chat/stream`).
 - Request body supports:
   - `web_search` (boolean)
+  - `agent_mode` (boolean, optional; `true` requests agentic flow for supported models, `false` disables agentic flow, omitted uses model default auto behavior)
   - `thinking_mode` (boolean, default `true`)
   - `images` (array of data URLs, used by `k2.5` only)
 - Agent implementation rule:
   - If a model supports reasoning, request and surface reasoning (`reasoning` SSE events) when `thinking_mode=true`.
+- Agent default rule:
+  - ReAct is the current agent architecture.
+  - When `agent_mode` is omitted, agentic flow is enabled for `qwen/qwen3.5-397b-a17b` and `z-ai/glm5`, and disabled for `moonshotai/kimi-k2.5`.
 - When `web_search=true`, backend tries DuckDuckGo search first, injects formatted results as a `system` message, then continues model generation.
 - Search failure does not block model output. UI shows search error and answer stream continues.
 
@@ -116,7 +120,7 @@ Thinking controls by model:
   - `_build_messages(..., search_context="")` supports search context injection.
   - `chat_once(..., enable_search=False)` supports optional web search.
   - `stream_chat(..., enable_search=False)` emits search events and then streams model output.
-- `backend/chat_handlers.py` reads `web_search` from request JSON and passes it to model calls.
+- `backend/chat_handlers.py` reads `web_search`/`agent_mode` from request JSON and passes them to model calls.
 
 ## 8) Usage
 1. Install dependencies: `pip install -r requirements.txt`.
@@ -134,7 +138,7 @@ Run:
 Current coverage includes:
 - web search mapping and formatting
 - WebBaseLoader fallback and SSL fallback paths
-- request flag propagation in handlers (`web_search`, `thinking_mode`, `images`)
+- request flag propagation in handlers (`web_search`, `agent_mode`, `thinking_mode`, `images`)
 - streaming search/context-usage/reasoning/token event behavior
 - `glm5` thinking on/off payload behavior
 

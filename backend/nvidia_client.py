@@ -193,8 +193,12 @@ def _is_agentic_model(model: str) -> bool:
     return model.startswith("qwen/") or model.startswith("z-ai/")
 
 
-def _should_use_agentic_flow(model: str, agent_mode: bool) -> bool:
-    return _is_agentic_model(model) and bool(agent_mode)
+def _should_use_agentic_flow(model: str, agent_mode: bool | None) -> bool:
+    if agent_mode is True:
+        return _is_agentic_model(model)
+    if agent_mode is False:
+        return False
+    return _is_agentic_model(model)
 
 
 def _stream_or_invoke_kwargs(model: str, thinking_mode: bool) -> dict:
@@ -314,7 +318,7 @@ def _run_langchain_react_agent(
     from langchain.agents import AgentExecutor, create_react_agent
     from langchain_core.callbacks import BaseCallbackHandler
     from langchain_core.prompts import PromptTemplate
-    from langchain_core.tools import tool
+    from .tools_registry import build_react_tools
 
     def _emit_event(event: dict):
         if isinstance(event_collector, list):
@@ -365,20 +369,8 @@ Question: {input}
 Thought:{agent_scratchpad}"""
     )
 
-    @tool("web_search")
-    def web_search_tool(query: str) -> str:
-        """Search the web for up-to-date information."""
-        _emit_event({"type": "search_start", "query": query})
-        try:
-            context, results = _run_web_search(query)
-            _emit_event({"type": "search_done", "results": results})
-            return context or "No useful search results."
-        except Exception as exc:  # noqa: BLE001
-            _emit_event({"type": "search_error", "error": str(exc)})
-            return f"Search error: {exc}"
-
     llm = client.bind(**_stream_or_invoke_kwargs(model, thinking_mode))
-    tools = [web_search_tool]
+    tools = build_react_tools(run_web_search=_run_web_search, emit_event=_emit_event)
     agent = create_react_agent(llm, tools, prompt)
     executor = AgentExecutor(
         agent=agent,
@@ -407,7 +399,7 @@ def chat_once(
     history: list,
     model: str | None = None,
     enable_search: bool = False,
-    agent_mode: bool = False,
+    agent_mode: bool | None = None,
     thinking_mode: bool = True,
     images: list[str] | None = None,
 ) -> str:
@@ -454,7 +446,7 @@ def stream_chat(
     history: list,
     model: str | None = None,
     enable_search: bool = False,
-    agent_mode: bool = False,
+    agent_mode: bool | None = None,
     thinking_mode: bool = True,
     images: list[str] | None = None,
 ):

@@ -55,7 +55,7 @@ api/chat.py         -> wraps backend/chat_handlers.py
 api/chat/stream.py  -> wraps backend/chat_handlers.py
 ```
 
-**Data flow:** Frontend sends POST to `/api/chat/stream` with `{ message, history, model?, web_search?, thinking_mode?, images? }`. Backend resolves the model, optionally runs web search, builds LangChain messages with history (last 20), streams tokens from NVIDIA API as SSE events (`search_start`, `search_done`, `token`, `reasoning`, `done`, `error`).
+**Data flow:** Frontend sends POST to `/api/chat/stream` with `{ message, history, model?, web_search?, agent_mode?, thinking_mode?, images? }`. Backend resolves the model, uses ReAct agentic flow for supported models by default when `agent_mode` is omitted (`qwen/qwen3.5-397b-a17b`, `z-ai/glm5`), optionally runs web search, builds LangChain messages with history (last 20), and streams SSE events (`search_start`, `search_done`, `token`, `reasoning`, `done`, `error`).
 
 **Key design decisions:**
 - Built-in `http.server.ThreadingHTTPServer` (no Flask/FastAPI)
