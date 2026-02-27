@@ -1,0 +1,6 @@
+data: {"type":"search_start","query":"failing query"}
+
+data: {"type":"search_error","error":"search backend unavailable"}
+
+data: {"type":"error","error":"stream crashed"}
+

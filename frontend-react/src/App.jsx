@@ -7,15 +7,15 @@ const MODELS = ["moonshotai/kimi-k2.5", "qwen/qwen3.5-397b-a17b", "z-ai/glm5"];
 const MAX_ATTACHMENTS = 5;
 const CONNECTED_TEXT = "已连接，输入你的问题开始对话。";
 
-function modelSupportsThinking(model) {
+export function modelSupportsThinking(model) {
   return model.startsWith("moonshotai/") || model.startsWith("qwen/") || model.startsWith("z-ai/");
 }
 
-function modelSupportsMediaInput(model) {
+export function modelSupportsMediaInput(model) {
   return model.startsWith("moonshotai/");
 }
 
-function shortModelName(model) {
+export function shortModelName(model) {
   const idx = model.lastIndexOf("/");
   return idx >= 0 ? model.slice(idx + 1) : model;
 }
@@ -430,13 +430,14 @@ export default function App() {
           <span>{isPending ? "模型正在生成回答..." : "就绪"}</span>
         </div>
 
-        <div id="messages" className="messages" ref={messagesRef}>
+        <div id="messages" className="messages" ref={messagesRef} data-testid="messages-list">
           {messages.map((msg) => {
             if (msg.role === "assistant_stream") {
               return (
                 <div key={msg.id} className="msg assistant stream">
                   {msg.search.state !== "hidden" && (
                     <CollapsibleSection title="Search" className="search" defaultOpen={true}>
+                      <div data-testid="search-panel">
                       <div className="assistant-body">
                         {msg.search.state === "loading" && (
                           <span className="search-loading">正在搜索: &ldquo;{msg.search.query}&rdquo;...</span>
@@ -461,11 +462,13 @@ export default function App() {
                           </div>
                         )}
                       </div>
+                      </div>
                     </CollapsibleSection>
                   )}
 
                   {msg.usageLines.length > 0 && (
                     <CollapsibleSection title="Context Usage" className="usage" defaultOpen={false}>
+                      <div data-testid="usage-panel">
                       <div className="assistant-body">
                         {msg.usageLines.map((line, idx) => (
                           <div className="agent-loading" key={`${msg.id}-u-${idx}`}>
@@ -473,12 +476,15 @@ export default function App() {
                           </div>
                         ))}
                       </div>
+                      </div>
                     </CollapsibleSection>
                   )}
 
                   {msg.reasoning && (
                     <CollapsibleSection title="Reasoning" className="reasoning" defaultOpen={true}>
+                      <div data-testid="reasoning-panel">
                       <RichBlock className="assistant-body" text={msg.reasoning} />
+                      </div>
                     </CollapsibleSection>
                   )}
 
@@ -553,7 +559,7 @@ export default function App() {
           <div className="input-shell">
             {/* Attachment strip */}
             {supportsMedia && (attachments.length > 0 || true) && (
-              <div className="attach-strip">
+              <div className="attach-strip" data-testid="attach-strip">
                 {attachments.map((att) => (
                   <div className="attach-thumb" key={att.id}>
                     {att.type === "image" ? (
