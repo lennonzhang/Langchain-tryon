@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import types
 import sys
+import time
 
 from backend.nvidia_client import (
     _build_chat_model,
@@ -32,18 +33,6 @@ class FakeClient:
         self.stream_kwargs = kwargs
         for chunk in self.chunks:
             yield chunk
-
-
-class SequenceClient:
-    def __init__(self, invoke_responses):
-        self.invoke_responses = list(invoke_responses)
-        self.calls = []
-
-    def invoke(self, messages, **kwargs):
-        self.calls.append({"messages": messages, "kwargs": kwargs})
-        if not self.invoke_responses:
-            return SimpleNamespace(content="", additional_kwargs={})
-        return self.invoke_responses.pop(0)
 
 
 class TestNvidiaClient(unittest.TestCase):
@@ -367,84 +356,100 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertIn({"type": "token", "content": "token-ok"}, events)
         self.assertEqual(events[-1]["type"], "done")
 
-    def test_chat_once_qwen_agentic_react_with_web_search(self):
-        agent_client = SequenceClient(
-            [
-                SimpleNamespace(
-                    content="Thought: need fresh data\nAction: web_search\nAction Input: nvidia market cap",
-                    additional_kwargs={},
-                ),
-                SimpleNamespace(
-                    content="Thought: enough\nAction: final\nAction Input: Final summary",
-                    additional_kwargs={},
-                ),
-            ]
-        )
-
+    def test_chat_once_qwen_agentic_react_without_manual_search_toggle(self):
+        fake_client = FakeClient()
         with (
             patch(
                 "backend.nvidia_client.resolve_model",
                 return_value="qwen/qwen3.5-397b-a17b",
             ),
-            patch("backend.nvidia_client._build_chat_model", return_value=agent_client),
+            patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
             patch(
-                "backend.nvidia_client._run_web_search",
-                return_value=("search context from tool", [{"title": "r1"}]),
-            ) as run_search,
+                "backend.nvidia_client._run_langchain_react_agent",
+                return_value="Final summary",
+            ) as run_agent,
         ):
             answer = chat_once(
                 "api-key",
                 "question",
                 [],
-                enable_search=True,
+                enable_search=False,
+                agent_mode=True,
                 thinking_mode=True,
             )
 
         self.assertEqual(answer, "Final summary")
-        run_search.assert_any_call("question")
-        run_search.assert_any_call("nvidia market cap")
-        self.assertEqual(run_search.call_count, 2)
-        self.assertEqual(len(agent_client.calls), 2)
+        run_agent.assert_called_once()
 
     def test_stream_chat_zai_agentic_react_emits_search_and_final_token(self):
-        agent_client = SequenceClient(
-            [
-                SimpleNamespace(
-                    content="Thought: let's search\nAction: web_search\nAction Input: langchain react pattern",
-                    additional_kwargs={"reasoning_content": "agent-think-1"},
-                ),
-                SimpleNamespace(
-                    content="Thought: done\nAction: final\nAction Input: final agent answer",
-                    additional_kwargs={"reasoning_content": "agent-think-2"},
-                ),
-            ]
-        )
+        def _fake_agent(*args, **kwargs):
+            emitter = kwargs.get("event_emitter")
+            if callable(emitter):
+                emitter({"type": "search_start", "query": "langchain react pattern"})
+                emitter({"type": "search_done", "results": [{"title": "r1"}]})
+                emitter({"type": "reasoning", "content": "agent thought"})
+            return "final agent answer"
 
         with (
             patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm5"),
-            patch("backend.nvidia_client._build_chat_model", return_value=agent_client),
+            patch("backend.nvidia_client._build_chat_model", return_value=FakeClient()),
             patch(
-                "backend.nvidia_client._run_web_search",
-                return_value=("tool observation", [{"title": "r1"}]),
-            ),
+                "backend.nvidia_client._run_langchain_react_agent",
+                side_effect=_fake_agent,
+            ) as run_agent,
         ):
             events = list(
                 stream_chat(
                     "api-key",
                     "question",
                     [],
-                    enable_search=True,
+                    enable_search=False,
+                    agent_mode=True,
                     thinking_mode=True,
                 )
             )
 
+        run_agent.assert_called_once()
+        self.assertTrue(run_agent.call_args.kwargs.get("emit_reasoning"))
         self.assertTrue(any(evt.get("type") == "context_usage" for evt in events))
-        self.assertIn({"type": "reasoning", "content": "agent-think-1"}, events)
-        self.assertIn({"type": "search_start", "query": "question"}, events)
         self.assertIn({"type": "search_start", "query": "langchain react pattern"}, events)
         self.assertTrue(any(evt.get("type") == "search_done" for evt in events))
+        self.assertIn({"type": "reasoning", "content": "agent thought"}, events)
         self.assertIn({"type": "token", "content": "final agent answer"}, events)
         self.assertEqual(events[-1]["type"], "done")
+
+    def test_stream_chat_agent_mode_emits_events_before_agent_finishes(self):
+        def _fake_agent(*args, **kwargs):
+            emitter = kwargs.get("event_emitter")
+            if callable(emitter):
+                emitter({"type": "search_start", "query": "early-query"})
+            time.sleep(0.3)
+            return "final"
+
+        with (
+            patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm5"),
+            patch("backend.nvidia_client._build_chat_model", return_value=FakeClient()),
+            patch(
+                "backend.nvidia_client._run_langchain_react_agent",
+                side_effect=_fake_agent,
+            ),
+        ):
+            events = stream_chat(
+                "api-key",
+                "question",
+                [],
+                enable_search=False,
+                agent_mode=True,
+                thinking_mode=True,
+            )
+            first = next(events)
+            start = time.monotonic()
+            second = next(events)
+            elapsed = time.monotonic() - start
+
+        self.assertEqual(first["type"], "context_usage")
+        self.assertEqual(second, {"type": "search_start", "query": "early-query"})
+        self.assertLess(elapsed, 0.2)
 
 
 if __name__ == "__main__":

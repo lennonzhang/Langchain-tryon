@@ -1,5 +1,6 @@
 import os
-import re
+import queue
+import threading
 from contextlib import contextmanager
 
 from .config import resolve_model
@@ -192,8 +193,8 @@ def _is_agentic_model(model: str) -> bool:
     return model.startswith("qwen/") or model.startswith("z-ai/")
 
 
-def _should_use_agentic_flow(model: str, enable_search: bool) -> bool:
-    return _is_agentic_model(model) and bool(enable_search)
+def _should_use_agentic_flow(model: str, agent_mode: bool) -> bool:
+    return _is_agentic_model(model) and bool(agent_mode)
 
 
 def _stream_or_invoke_kwargs(model: str, thinking_mode: bool) -> dict:
@@ -285,103 +286,119 @@ def _run_web_search(
     return context, results
 
 
-def _agent_system_prompt(enable_search: bool) -> str:
-    tool_block = (
-        "- web_search: Search the web for up-to-date information.\n"
-        "  Action Input should be a concise search query.\n"
-    )
-    if not enable_search:
-        tool_block = "- No tools are available."
+def _history_as_text(history: list) -> str:
+    if not isinstance(history, list):
+        return ""
 
-    return (
-        "You are an agent that follows ReAct.\n"
-        "At each step, output EXACTLY this format:\n"
-        "Thought: <short reasoning>\n"
-        "Action: <tool name or final>\n"
-        "Action Input: <tool input or final answer>\n"
-        "Rules:\n"
-        "- If enough information is available, use Action: final.\n"
-        "- If a tool fails, continue with best-effort answer.\n"
-        "- Do not output markdown code fences.\n"
-        "Tools:\n"
-        f"{tool_block}"
-    )
+    lines = []
+    for item in history[-20:]:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role in {"user", "assistant", "system"} and isinstance(content, str):
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines)
 
 
-def _extract_react_fields(content: str) -> tuple[str, str]:
-    text = content.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-        text = text.strip()
-
-    action_match = re.search(r"(?im)^Action:\s*(.+?)\s*$", text)
-    input_match = re.search(r"(?ims)^Action Input:\s*(.+)$", text)
-    action = action_match.group(1).strip().lower() if action_match else ""
-    action_input = input_match.group(1).strip() if input_match else ""
-    return action, action_input
-
-
-def _build_agent_messages(
-    model: str,
-    message: str,
-    history: list,
-    scratchpad: str,
-    images: list[str] | None,
-    enable_search: bool,
-) -> list[dict]:
-    messages = [{"role": "system", "content": _agent_system_prompt(enable_search)}]
-    messages.extend(_build_messages(model, message, history, "", images))
-    if scratchpad:
-        messages.append(
-            {
-                "role": "system",
-                "content": f"Previous steps and observations:\n{scratchpad}",
-            }
-        )
-    return messages
-
-
-def _extract_reasoning(additional_kwargs: dict) -> str:
-    reasoning = additional_kwargs.get("reasoning_content")
-    if isinstance(reasoning, str):
-        return reasoning
-    return ""
-
-
-def _agent_step(
+def _run_langchain_react_agent(
     client,
     model: str,
     message: str,
     history: list,
-    scratchpad: str,
     thinking_mode: bool,
-    images: list[str] | None,
-    enable_search: bool,
-):
-    messages = _build_agent_messages(
-        model=model,
-        message=message,
-        history=history,
-        scratchpad=scratchpad,
-        images=images,
-        enable_search=enable_search,
+    event_collector: list[dict] | None = None,
+    event_emitter=None,
+    emit_reasoning: bool = False,
+) -> str:
+    from langchain.agents import AgentExecutor, create_react_agent
+    from langchain_core.callbacks import BaseCallbackHandler
+    from langchain_core.prompts import PromptTemplate
+    from langchain_core.tools import tool
+
+    def _emit_event(event: dict):
+        if isinstance(event_collector, list):
+            event_collector.append(event)
+        if callable(event_emitter):
+            event_emitter(event)
+
+    class _AgentEventHandler(BaseCallbackHandler):
+        def __init__(self, enabled: bool):
+            self.enabled = enabled
+
+        def on_llm_end(self, response, **kwargs):
+            if not self.enabled:
+                return
+            generations = getattr(response, "generations", None)
+            if not isinstance(generations, list):
+                return
+            for generation_group in generations:
+                if not isinstance(generation_group, list):
+                    continue
+                for generation in generation_group:
+                    message_obj = getattr(generation, "message", None)
+                    additional = getattr(message_obj, "additional_kwargs", {}) or {}
+                    reasoning = additional.get("reasoning_content")
+                    if isinstance(reasoning, str) and reasoning:
+                        _emit_event({"type": "reasoning", "content": reasoning})
+
+    prompt = PromptTemplate.from_template(
+        """You are a helpful agent that can use tools.
+
+You have access to the following tools:
+{tools}
+
+Use the following format:
+Question: the input question you must answer
+Thought: think about what to do next
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Conversation history:
+{chat_history}
+
+Question: {input}
+Thought:{agent_scratchpad}"""
     )
-    response = client.invoke(
-        messages,
-        **_stream_or_invoke_kwargs(model, thinking_mode),
+
+    @tool("web_search")
+    def web_search_tool(query: str) -> str:
+        """Search the web for up-to-date information."""
+        _emit_event({"type": "search_start", "query": query})
+        try:
+            context, results = _run_web_search(query)
+            _emit_event({"type": "search_done", "results": results})
+            return context or "No useful search results."
+        except Exception as exc:  # noqa: BLE001
+            _emit_event({"type": "search_error", "error": str(exc)})
+            return f"Search error: {exc}"
+
+    llm = client.bind(**_stream_or_invoke_kwargs(model, thinking_mode))
+    tools = [web_search_tool]
+    agent = create_react_agent(llm, tools, prompt)
+    executor = AgentExecutor(
+        agent=agent,
+        tools=tools,
+        max_iterations=_AGENT_MAX_STEPS,
+        handle_parsing_errors=True,
+        return_intermediate_steps=False,
+        verbose=False,
     )
-    content = _extract_text(getattr(response, "content", ""))
-    additional = getattr(response, "additional_kwargs", {}) or {}
-    reasoning = _extract_reasoning(additional)
-    action, action_input = _extract_react_fields(content)
-    return {
-        "messages": messages,
-        "content": content,
-        "reasoning": reasoning,
-        "action": action,
-        "action_input": action_input,
-    }
+
+    callbacks = [_AgentEventHandler(bool(emit_reasoning))]
+    result = executor.invoke(
+        {
+            "input": message,
+            "chat_history": _history_as_text(history),
+        },
+        config={"callbacks": callbacks},
+    )
+    output = result.get("output", "")
+    return output.strip() if isinstance(output, str) else str(output)
 
 
 def chat_once(
@@ -390,59 +407,28 @@ def chat_once(
     history: list,
     model: str | None = None,
     enable_search: bool = False,
+    agent_mode: bool = False,
     thinking_mode: bool = True,
     images: list[str] | None = None,
 ) -> str:
     chosen_model = resolve_model(model)
     client = _build_chat_model(api_key, chosen_model, thinking_mode=thinking_mode)
-    initial_search_context = ""
 
+    if _should_use_agentic_flow(chosen_model, agent_mode):
+        agent_events: list[dict] = []
+        with _proxy_env_guard():
+            return _run_langchain_react_agent(
+                client=client,
+                model=chosen_model,
+                message=message,
+                history=history,
+                thinking_mode=thinking_mode,
+                event_collector=agent_events,
+            )
+
+    initial_search_context = ""
     if enable_search:
         initial_search_context, _ = _run_web_search(message)
-
-    if _should_use_agentic_flow(chosen_model, enable_search):
-        scratchpad = (
-            f"\nInitial search observation:\n{initial_search_context}\n"
-            if initial_search_context
-            else ""
-        )
-        final_answer = ""
-        with _proxy_env_guard():
-            for step in range(_AGENT_MAX_STEPS):
-                step_result = _agent_step(
-                    client=client,
-                    model=chosen_model,
-                    message=message,
-                    history=history,
-                    scratchpad=scratchpad,
-                    thinking_mode=thinking_mode,
-                    images=None,
-                    enable_search=enable_search,
-                )
-                action = step_result["action"]
-                action_input = step_result["action_input"]
-                content = step_result["content"]
-
-                if action == "final":
-                    final_answer = action_input or content
-                    break
-
-                if action == "web_search" and action_input:
-                    try:
-                        context, _ = _run_web_search(action_input)
-                        observation = context or "No useful search results."
-                    except Exception as exc:  # noqa: BLE001
-                        observation = f"Search error: {exc}"
-                    scratchpad += (
-                        f"\nStep {step + 1} output:\n{content}\n"
-                        f"Observation:\n{observation}\n"
-                    )
-                    continue
-
-                final_answer = action_input or content
-                break
-
-        return final_answer.strip()
 
     normalized_images = _normalize_media_data_urls(images)
     messages = _build_messages(
@@ -468,14 +454,69 @@ def stream_chat(
     history: list,
     model: str | None = None,
     enable_search: bool = False,
+    agent_mode: bool = False,
     thinking_mode: bool = True,
     images: list[str] | None = None,
 ):
     chosen_model = resolve_model(model)
     client = _build_chat_model(api_key, chosen_model, thinking_mode=thinking_mode)
     emit_reasoning = _supports_thinking(chosen_model) and bool(thinking_mode)
-    initial_search_context = ""
 
+    if _should_use_agentic_flow(chosen_model, agent_mode):
+        agent_events: list[dict] = []
+        result_queue: queue.Queue = queue.Queue()
+        state = {"final_answer": "", "error": None}
+
+        def _emit_from_agent(event: dict):
+            result_queue.put(event)
+
+        def _run_agent():
+            try:
+                with _proxy_env_guard():
+                    state["final_answer"] = _run_langchain_react_agent(
+                        client=client,
+                        model=chosen_model,
+                        message=message,
+                        history=history,
+                        thinking_mode=thinking_mode,
+                        event_collector=agent_events,
+                        event_emitter=_emit_from_agent,
+                        emit_reasoning=emit_reasoning,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                state["error"] = exc
+
+        worker = threading.Thread(target=_run_agent, daemon=True)
+        worker.start()
+
+        yield {
+            "type": "context_usage",
+            "usage": _context_usage_payload(
+                chosen_model,
+                "agent",
+                _build_messages(chosen_model, message, history, "", []),
+            ),
+        }
+
+        while worker.is_alive() or not result_queue.empty():
+            try:
+                evt = result_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if isinstance(evt, dict) and evt.get("type"):
+                yield evt
+
+        if state["error"] is not None:
+            yield {"type": "error", "error": str(state["error"])}
+            yield {"type": "done", "finish_reason": "error"}
+            return
+
+        if state["final_answer"]:
+            yield {"type": "token", "content": state["final_answer"]}
+        yield {"type": "done", "finish_reason": "stop"}
+        return
+
+    initial_search_context = ""
     if enable_search:
         yield {"type": "search_start", "query": message}
         try:
@@ -483,69 +524,6 @@ def stream_chat(
             yield {"type": "search_done", "results": results}
         except Exception as exc:  # noqa: BLE001
             yield {"type": "search_error", "error": str(exc)}
-
-    if _should_use_agentic_flow(chosen_model, enable_search):
-        scratchpad = (
-            f"\nInitial search observation:\n{initial_search_context}\n"
-            if initial_search_context
-            else ""
-        )
-        final_answer = ""
-        with _proxy_env_guard():
-            for step in range(_AGENT_MAX_STEPS):
-                step_result = _agent_step(
-                    client=client,
-                    model=chosen_model,
-                    message=message,
-                    history=history,
-                    scratchpad=scratchpad,
-                    thinking_mode=thinking_mode,
-                    images=None,
-                    enable_search=enable_search,
-                )
-
-                yield {
-                    "type": "context_usage",
-                    "usage": _context_usage_payload(
-                        chosen_model,
-                        f"agent_step_{step + 1}",
-                        step_result["messages"],
-                    ),
-                }
-
-                if emit_reasoning and step_result["reasoning"]:
-                    yield {"type": "reasoning", "content": step_result["reasoning"]}
-
-                action = step_result["action"]
-                action_input = step_result["action_input"]
-                content = step_result["content"]
-
-                if action == "final":
-                    final_answer = (action_input or content).strip()
-                    break
-
-                if action == "web_search" and action_input:
-                    yield {"type": "search_start", "query": action_input}
-                    try:
-                        context, results = _run_web_search(action_input)
-                        yield {"type": "search_done", "results": results}
-                        observation = context or "No useful search results."
-                    except Exception as exc:  # noqa: BLE001
-                        yield {"type": "search_error", "error": str(exc)}
-                        observation = f"Search error: {exc}"
-                    scratchpad += (
-                        f"\nStep {step + 1} output:\n{content}\n"
-                        f"Observation:\n{observation}\n"
-                    )
-                    continue
-
-                final_answer = (action_input or content).strip()
-                break
-
-        if final_answer:
-            yield {"type": "token", "content": final_answer}
-        yield {"type": "done", "finish_reason": "stop"}
-        return
 
     normalized_images = _normalize_media_data_urls(images)
     messages = _build_messages(
