@@ -1,87 +1,99 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Quick operating notes for Claude Code in this repo.
 
-## Project Overview
+## Overview
 
-Full-stack AI chat application using a Python/LangChain backend with NVIDIA AI endpoints and a React frontend. Supports streaming responses (SSE), web search, multimodal input (images/video), and thinking mode. Deployed on Vercel (serverless) or run locally via a built-in Python HTTP server.
-Default chat path is streaming (`/api/chat/stream`).
+Full-stack LangChain chat app:
+
+- Backend: Python `http.server` style API + static serving
+- Frontend: React + Vite output served from `frontend/dist`
+- Features: streaming SSE, web search, reasoning stream, optional multimodal input, tool-calling agent flow
+
+Default endpoint: `POST /api/chat/stream`.
 
 ## Commands
 
-### Backend
 ```bash
-# Run server locally (serves frontend static files + API)
+# backend
 python server.py
-
-# Run all backend tests
 python -m unittest discover -s tests -v
 
-# Run a single test file
-python -m unittest tests.test_nvidia_client -v
+# frontend (from frontend-react/)
+pnpm install
+pnpm run dev
+pnpm run build
+pnpm test
 ```
 
-### Frontend (from frontend-react/)
-```bash
-pnpm install          # Install dependencies from pnpm-lock.yaml
-pnpm run dev          # Vite dev server with hot reload
-pnpm run build        # Production build -> ../frontend/dist
-pnpm run preview      # Preview production build
-```
+## Runtime Baseline
 
-Node/pnpm baseline for this repo:
-```bash
-node -v   # v22.22.0
-pnpm -v   # 10+
-```
+- Python `3.12+`
+- Node `22.22.0`
+- pnpm `10+`
 
-### CI
-GitHub Actions should run Python 3.12 unit tests and Node 22 frontend build on PRs to main.
+## Architecture Map
 
-## Architecture
+- `backend/nvidia_client.py`: public facade (`chat_once`, `stream_chat`)
+- `backend/model_registry.py`: model capability source of truth
+- `backend/model_profile.py`: model params/build logic
+- `backend/message_builder.py`: message/media assembly + token estimate
+- `backend/agent_orchestrator.py`: `create_tool_calling_agent` flow
+- `backend/event_mapper.py`: direct/agent streaming event generation
+- `backend/search_provider.py`: unified search event emission
+- `backend/tools_registry.py`: LangChain tools
+- `backend/schemas.py`: request schema parsing
+- `backend/chat_handlers.py`: route handlers
+- `backend/http_utils.py`: JSON/SSE helpers
+- `frontend-react/src/App.jsx`: frontend composition root
+- `frontend-react/src/hooks/*`, `components/*`, `utils/*`: frontend state and UI modules
+- `api/capabilities.py`, `api/chat.py`, `api/chat/stream.py`: Vercel wrappers
 
-```
-Frontend (React 18 + Vite)          Backend (Python http.server)
----------------------------------------------------------------
-frontend-react/src/App.jsx    ->    backend/chat_handlers.py (route handlers)
-frontend-react/src/stream.js  ->    backend/http_utils.py    (SSE + static serving)
-                                    backend/nvidia_client.py  (LangChain ChatNVIDIA)
-                                    backend/web_search.py     (DuckDuckGo + loaders)
-                                    backend/config.py         (env + model resolution)
+## Key Paths
 
-Vercel Wrappers (api/)
-----------------------
-api/chat.py         -> wraps backend/chat_handlers.py
-api/chat/stream.py  -> wraps backend/chat_handlers.py
-```
+- `backend/model_registry.py`: model capabilities/defaults source of truth
+- `backend/model_profile.py`: model construction and invoke/stream kwargs
+- `backend/message_builder.py`: history/media normalization, message construction
+- `backend/agent_orchestrator.py`: tool-calling agent execution
+- `backend/event_mapper.py`: direct/agent streaming event generation
+- `backend/search_provider.py`: shared search event emitter
+- `backend/tools_registry.py`: LangChain tool definitions
+- `backend/schemas.py`: request payload parsing (`ChatRequest`)
+- `backend/chat_handlers.py`: `/api/chat` and `/api/chat/stream` handlers
+- `backend/http_utils.py`: `send_json`, `send_sse_event`, static file serving helpers
+- `backend/nvidia_client.py`: facade entrypoint for chat logic
+- `backend/server.py`: local HTTP entrypoint and routing
+- `frontend-react/src/App.jsx`: app composition
+- `frontend-react/src/hooks/useCapabilities.js`: capability bootstrap and model selection
+- `frontend-react/src/hooks/useChatStream.js`: streaming state machine
+- `frontend-react/src/hooks/useAttachments.js`: media attachment workflow
+- `frontend-react/src/stream.js`: SSE parser
+- `api/capabilities.py`: serverless capabilities endpoint
+- `api/chat.py`, `api/chat/stream.py`: serverless chat wrappers
 
-**Data flow:** Frontend sends POST to `/api/chat/stream` with `{ message, history, model?, web_search?, agent_mode?, thinking_mode?, images? }`. Backend resolves the model, uses ReAct agentic flow for supported models by default when `agent_mode` is omitted (`qwen/qwen3.5-397b-a17b`, `z-ai/glm5`), optionally runs web search, builds LangChain messages with history (last 20), and streams SSE events (`search_start`, `search_done`, `token`, `reasoning`, `done`, `error`).
+## API + SSE Contract
 
-**Key design decisions:**
-- Built-in `http.server.ThreadingHTTPServer` (no Flask/FastAPI)
-- Frontend builds to static assets served by backend; SPA fallback routing
-- Stateless: session history managed on the frontend
-- Lazy LangChain imports for graceful degradation
-- Web content loading fallback chain: WebBaseLoader -> requests+BS4 -> SSL-disabled retry
+Request fields:
 
-## Models
+- `message` (required), `history`, `model`, `web_search`, `agent_mode`, `thinking_mode`, `images`, `request_id`
 
-- `moonshotai/kimi-k2.5` (default): images, video, thinking mode (temp 1.0 with thinking, 0.6 without)
-- `qwen/qwen3.5-397b-a17b`: thinking mode supported (`chat_template_kwargs.enable_thinking`), reasoning from `additional_kwargs.reasoning_content`
-- `z-ai/glm5`: thinking mode only (temp 0.7 always)
+SSE events:
 
-Model capability rule:
-- If a selected model supports reasoning, backend/frontend must expose reasoning output in stream mode.
+- `search_start`, `search_done`, `search_error`, `context_usage`, `reasoning`, `token`, `error`, `done`
+- Enrichment: `v: 1`, plus `request_id` when available
+- Error invariant: `error` then `done` (`finish_reason: "error"`)
 
-## Environment Variables
+## Model Rules
 
-Required: `NVIDIA_API_KEY`
-Optional: `PORT` (default 8000), `NVIDIA_USE_SYSTEM_PROXY`, `NVIDIA_TIMEOUT_SECONDS` (default 300), `NVIDIA_MAX_COMPLETION_TOKENS` (default 4096, max 16384), `USER_AGENT`
+- Supported: `moonshotai/kimi-k2.5` (default), `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
+- Auto `agent_mode` when omitted:
+  - on: qwen, glm
+  - off: kimi
+- If model supports reasoning and `thinking_mode=true`, stream reasoning events
 
-## Tech Stack & Conventions
+## Documentation Rule
 
-- **Python:** PEP 8, snake_case, unittest with mock, private functions prefixed `_`
-- **JavaScript:** Plain JSX (no TypeScript), React hooks, camelCase, marked + DOMPurify for markdown
-- **Node:** Requires 22.22.0 (or compatible 22.x patch), pnpm 10+ required
-- **Python:** Requires 3.12+
-- **Tests:** Located in `tests/`, covering nvidia_client, chat_handlers, and web_search modules
+When behavior changes:
+
+- update `AGENTS.md`, `CLAUDE.md`, `README.md` as needed
+- append detailed entry to `CHANGELOG.md`

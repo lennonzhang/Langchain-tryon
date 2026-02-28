@@ -369,7 +369,7 @@ class TestNvidiaClient(unittest.TestCase):
             ),
             patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
             patch(
-                "backend.nvidia_client._run_langchain_react_agent",
+                "backend.nvidia_client._run_langchain_agent",
                 return_value="Final summary",
             ) as run_agent,
         ):
@@ -394,7 +394,7 @@ class TestNvidiaClient(unittest.TestCase):
             ),
             patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
             patch(
-                "backend.nvidia_client._run_langchain_react_agent",
+                "backend.nvidia_client._run_langchain_agent",
                 return_value="Final summary",
             ) as run_agent,
         ):
@@ -417,7 +417,7 @@ class TestNvidiaClient(unittest.TestCase):
                 return_value="moonshotai/kimi-k2.5",
             ),
             patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
-            patch("backend.nvidia_client._run_langchain_react_agent") as run_agent,
+            patch("backend.nvidia_client._run_langchain_agent") as run_agent,
         ):
             answer = chat_once(
                 "api-key",
@@ -446,7 +446,7 @@ class TestNvidiaClient(unittest.TestCase):
             ),
             patch("backend.nvidia_client._build_chat_model", return_value=FakeClient()),
             patch(
-                "backend.nvidia_client._run_langchain_react_agent",
+                "backend.nvidia_client._run_langchain_agent",
                 return_value="final",
             ) as run_agent,
         ):
@@ -476,7 +476,7 @@ class TestNvidiaClient(unittest.TestCase):
             patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm5"),
             patch("backend.nvidia_client._build_chat_model", return_value=FakeClient()),
             patch(
-                "backend.nvidia_client._run_langchain_react_agent",
+                "backend.nvidia_client._run_langchain_agent",
                 side_effect=_fake_agent,
             ) as run_agent,
         ):
@@ -512,7 +512,7 @@ class TestNvidiaClient(unittest.TestCase):
             patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm5"),
             patch("backend.nvidia_client._build_chat_model", return_value=FakeClient()),
             patch(
-                "backend.nvidia_client._run_langchain_react_agent",
+                "backend.nvidia_client._run_langchain_agent",
                 side_effect=_fake_agent,
             ),
         ):

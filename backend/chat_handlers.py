@@ -1,29 +1,16 @@
+from __future__ import annotations
+
 import json
 from urllib import error
 
 from .http_utils import init_sse, read_json_body, send_json, send_sse_event
 from .nvidia_client import chat_once, stream_chat
+from .schemas import ChatRequest
 
 
 def _is_gateway_timeout_error(exc: Exception) -> bool:
     detail = str(exc)
     return "504" in detail and "Gateway Timeout" in detail
-
-
-def _parse_chat_payload(data: dict) -> dict:
-    agent_mode = data.get("agent_mode", None)
-    if not isinstance(agent_mode, bool):
-        agent_mode = None
-
-    return {
-        "message": str(data.get("message", "")).strip(),
-        "history": data.get("history", []),
-        "model": data.get("model"),
-        "enable_search": bool(data.get("web_search", False)),
-        "agent_mode": agent_mode,
-        "thinking_mode": bool(data.get("thinking_mode", True)),
-        "images": data.get("images", []),
-    }
 
 
 def handle_chat_once(handler, api_key: str) -> None:
@@ -33,22 +20,21 @@ def handle_chat_once(handler, api_key: str) -> None:
         send_json(handler, 400, {"error": "Invalid JSON body"})
         return
 
-    payload = _parse_chat_payload(data)
-    message = payload["message"]
-    if not message:
+    req = ChatRequest.from_dict(data)
+    if not req.message:
         send_json(handler, 400, {"error": "message is required"})
         return
 
     try:
         answer = chat_once(
             api_key,
-            message,
-            payload["history"],
-            payload["model"],
-            enable_search=payload["enable_search"],
-            agent_mode=payload["agent_mode"],
-            thinking_mode=payload["thinking_mode"],
-            images=payload["images"],
+            req.message,
+            req.history,
+            req.model,
+            enable_search=req.enable_search,
+            agent_mode=req.agent_mode,
+            thinking_mode=req.thinking_mode,
+            images=req.images,
         )
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
@@ -82,43 +68,40 @@ def handle_chat_stream(handler, api_key: str) -> None:
         send_json(handler, 400, {"error": "Invalid JSON body"})
         return
 
-    payload = _parse_chat_payload(data)
-    message = payload["message"]
-    if not message:
+    req = ChatRequest.from_dict(data)
+    if not req.message:
         send_json(handler, 400, {"error": "message is required"})
         return
 
+    rid = req.request_id
     init_sse(handler)
+
+    def _emit(payload: dict) -> None:
+        send_sse_event(handler, payload, request_id=rid)
+
+    def _emit_error_and_done(error_msg: str) -> None:
+        try:
+            _emit({"type": "error", "error": error_msg})
+            _emit({"type": "done", "finish_reason": "error"})
+        except OSError:
+            return
 
     try:
         for event in stream_chat(
             api_key,
-            message,
-            payload["history"],
-            payload["model"],
-            enable_search=payload["enable_search"],
-            agent_mode=payload["agent_mode"],
-            thinking_mode=payload["thinking_mode"],
-            images=payload["images"],
+            req.message,
+            req.history,
+            req.model,
+            enable_search=req.enable_search,
+            agent_mode=req.agent_mode,
+            thinking_mode=req.thinking_mode,
+            images=req.images,
         ):
-            send_sse_event(handler, event)
+            _emit(event)
     except TimeoutError as exc:
-        try:
-            send_sse_event(
-                handler,
-                {"type": "error", "error": f"Upstream request timeout: {str(exc)[:500]}"},
-            )
-        except OSError:
-            return
+        _emit_error_and_done(f"Upstream request timeout: {str(exc)[:500]}")
     except Exception as exc:  # noqa: BLE001
         if _is_gateway_timeout_error(exc):
-            try:
-                send_sse_event(handler, {"type": "error", "error": "Upstream gateway timeout"})
-            except OSError:
-                return
+            _emit_error_and_done("Upstream gateway timeout")
             return
-        try:
-            send_sse_event(handler, {"type": "error", "error": str(exc)})
-        except OSError:
-            # Client disconnected; nothing left to write.
-            return
+        _emit_error_and_done(str(exc))

@@ -3,12 +3,6 @@ from pathlib import Path
 
 
 API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-MODEL = "moonshotai/kimi-k2.5"
-SUPPORTED_MODELS = (
-    "moonshotai/kimi-k2.5",
-    "qwen/qwen3.5-397b-a17b",
-    "z-ai/glm5",
-)
 
 
 def _strip_quotes(value: str) -> str:
@@ -57,6 +51,8 @@ def load_api_key(base_dir: Path | None = None) -> str:
 
 
 def resolve_model(model: str | None) -> str:
-    if isinstance(model, str) and model in SUPPORTED_MODELS:
+    from .model_registry import get_by_id, get_default
+
+    if isinstance(model, str) and get_by_id(model) is not None:
         return model
-    return MODEL
+    return get_default()["id"]

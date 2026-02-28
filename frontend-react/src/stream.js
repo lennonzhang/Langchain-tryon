@@ -23,15 +23,18 @@ export async function parseEventStream(reader, onEvent) {
           continue;
         }
         const payload = line.slice(5).trim();
+        let event;
         try {
-          const event = JSON.parse(payload);
-          onEvent(event);
-          if (event?.type === "done") {
-            await reader.cancel();
-            return;
-          }
+          event = JSON.parse(payload);
         } catch {
           // Ignore malformed events and continue processing stream.
+          continue;
+        }
+
+        onEvent(event);
+        if (event?.type === "done") {
+          await reader.cancel();
+          return;
         }
       }
     }

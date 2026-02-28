@@ -184,7 +184,7 @@ class TestChatHandlers(unittest.TestCase):
         self.assertEqual(args[1], 504)
         self.assertEqual(args[2]["error"], "Upstream request timeout")
 
-    def test_handle_chat_stream_gateway_timeout_emits_error_event(self):
+    def test_handle_chat_stream_gateway_timeout_emits_error_and_done(self):
         handler = object()
         with (
             patch(
@@ -200,10 +200,71 @@ class TestChatHandlers(unittest.TestCase):
         ):
             handle_chat_stream(handler, "api-key")
 
-        send_sse_mock.assert_called_once_with(
-            handler,
-            {"type": "error", "error": "Upstream gateway timeout"},
-        )
+        self.assertEqual(send_sse_mock.call_count, 2)
+        error_call = send_sse_mock.call_args_list[0]
+        self.assertEqual(error_call[0][1], {"type": "error", "error": "Upstream gateway timeout"})
+        done_call = send_sse_mock.call_args_list[1]
+        self.assertEqual(done_call[0][1], {"type": "done", "finish_reason": "error"})
+
+    def test_handle_chat_stream_timeout_emits_error_and_done(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": []},
+            ),
+            patch("backend.chat_handlers.init_sse"),
+            patch(
+                "backend.chat_handlers.stream_chat",
+                side_effect=TimeoutError("timed out"),
+            ),
+            patch("backend.chat_handlers.send_sse_event") as send_sse_mock,
+        ):
+            handle_chat_stream(handler, "api-key")
+
+        self.assertEqual(send_sse_mock.call_count, 2)
+        error_call = send_sse_mock.call_args_list[0]
+        self.assertIn("Upstream request timeout", error_call[0][1]["error"])
+        done_call = send_sse_mock.call_args_list[1]
+        self.assertEqual(done_call[0][1], {"type": "done", "finish_reason": "error"})
+
+    def test_handle_chat_stream_passes_request_id_to_sse_events(self):
+        events = [{"type": "token", "content": "hi"}, {"type": "done"}]
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": [], "request_id": "rid-42"},
+            ),
+            patch("backend.chat_handlers.init_sse"),
+            patch("backend.chat_handlers.stream_chat", return_value=iter(events)),
+            patch("backend.chat_handlers.send_sse_event") as send_sse_mock,
+        ):
+            handle_chat_stream(handler, "api-key")
+
+        self.assertEqual(send_sse_mock.call_count, 2)
+        for call in send_sse_mock.call_args_list:
+            self.assertEqual(call[1].get("request_id"), "rid-42")
+
+    def test_handle_chat_stream_generic_exception_emits_error_and_done(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": []},
+            ),
+            patch("backend.chat_handlers.init_sse"),
+            patch(
+                "backend.chat_handlers.stream_chat",
+                side_effect=RuntimeError("something broke"),
+            ),
+            patch("backend.chat_handlers.send_sse_event") as send_sse_mock,
+        ):
+            handle_chat_stream(handler, "api-key")
+
+        self.assertEqual(send_sse_mock.call_count, 2)
+        self.assertEqual(send_sse_mock.call_args_list[0][0][1]["type"], "error")
+        self.assertEqual(send_sse_mock.call_args_list[1][0][1], {"type": "done", "finish_reason": "error"})
 
 
 if __name__ == "__main__":

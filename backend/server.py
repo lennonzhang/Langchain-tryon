@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from .chat_handlers import handle_chat_once, handle_chat_stream
 from .config import load_api_key
 from .http_utils import send_json, serve_static
+from .model_registry import capabilities_response
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
@@ -16,6 +17,10 @@ class ChatHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         req_path = urlparse(self.path).path
+
+        if req_path == "/api/capabilities":
+            send_json(self, 200, capabilities_response())
+            return
 
         if req_path.startswith("/api/"):
             send_json(self, 404, {"error": "Not found"})
