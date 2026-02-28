@@ -3,11 +3,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import types
 import sys
+import time
 
 from backend.nvidia_client import (
     _build_chat_model,
     _build_messages,
     _normalize_media_data_urls,
+    _should_use_agentic_flow,
     chat_once,
     stream_chat,
 )
@@ -162,6 +164,63 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertEqual(fake_client.invoke_kwargs["max_completion_tokens"], 16384)
         self.assertEqual(fake_client.invoke_kwargs["chat_template_kwargs"], {"thinking": False})
 
+    def test_chat_once_kimi_search_keeps_non_agentic_injection(self):
+        fake_client = FakeClient(invoke_content="ok")
+        with (
+            patch(
+                "backend.nvidia_client.resolve_model",
+                return_value="moonshotai/kimi-k2.5",
+            ),
+            patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
+            patch(
+                "backend.nvidia_client._run_web_search",
+                return_value=("search system context", [{"title": "r1"}]),
+            ) as run_search,
+        ):
+            answer = chat_once(
+                "api-key",
+                "question",
+                [],
+                model="moonshotai/kimi-k2.5",
+                enable_search=True,
+            )
+
+        self.assertEqual(answer, "ok")
+        run_search.assert_called_once_with("question")
+        self.assertEqual(
+            fake_client.invoked_messages[0],
+            {"role": "system", "content": "search system context"},
+        )
+
+    def test_chat_once_search_enabled_runs_initial_search_for_all_models_when_agent_disabled(self):
+        models = [
+            "moonshotai/kimi-k2.5",
+            "qwen/qwen3.5-397b-a17b",
+            "z-ai/glm5",
+        ]
+
+        for model in models:
+            with self.subTest(model=model):
+                fake_client = FakeClient(invoke_content="Thought: done\nAction: final\nAction Input: ok")
+                with (
+                    patch("backend.nvidia_client.resolve_model", return_value=model),
+                    patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
+                    patch(
+                        "backend.nvidia_client._run_web_search",
+                        return_value=("search system context", [{"title": "r1"}]),
+                    ) as run_search,
+                ):
+                    chat_once(
+                        "api-key",
+                        "question",
+                        [],
+                        model=model,
+                        enable_search=True,
+                        agent_mode=False,
+                    )
+
+                run_search.assert_any_call("question")
+
     def test_stream_chat_emits_search_events_and_stream_content(self):
         chunks = [
             SimpleNamespace(
@@ -226,6 +285,7 @@ class TestNvidiaClient(unittest.TestCase):
                     "question",
                     [],
                     enable_search=False,
+                    agent_mode=False,
                     thinking_mode=False,
                 )
             )
@@ -262,6 +322,7 @@ class TestNvidiaClient(unittest.TestCase):
                     "question",
                     [],
                     enable_search=False,
+                    agent_mode=False,
                     thinking_mode=True,
                 )
             )
@@ -298,6 +359,179 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertEqual(events[1]["type"], "search_error")
         self.assertIn({"type": "token", "content": "token-ok"}, events)
         self.assertEqual(events[-1]["type"], "done")
+
+    def test_chat_once_qwen_agentic_react_without_manual_search_toggle(self):
+        fake_client = FakeClient()
+        with (
+            patch(
+                "backend.nvidia_client.resolve_model",
+                return_value="qwen/qwen3.5-397b-a17b",
+            ),
+            patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
+            patch(
+                "backend.nvidia_client._run_langchain_agent",
+                return_value="Final summary",
+            ) as run_agent,
+        ):
+            answer = chat_once(
+                "api-key",
+                "question",
+                [],
+                enable_search=False,
+                agent_mode=True,
+                thinking_mode=True,
+            )
+
+        self.assertEqual(answer, "Final summary")
+        run_agent.assert_called_once()
+
+    def test_chat_once_qwen_agentic_react_auto_enabled_by_default(self):
+        fake_client = FakeClient()
+        with (
+            patch(
+                "backend.nvidia_client.resolve_model",
+                return_value="qwen/qwen3.5-397b-a17b",
+            ),
+            patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
+            patch(
+                "backend.nvidia_client._run_langchain_agent",
+                return_value="Final summary",
+            ) as run_agent,
+        ):
+            answer = chat_once(
+                "api-key",
+                "question",
+                [],
+                enable_search=False,
+                thinking_mode=True,
+            )
+
+        self.assertEqual(answer, "Final summary")
+        run_agent.assert_called_once()
+
+    def test_chat_once_kimi_auto_agent_disabled_by_default(self):
+        fake_client = FakeClient(invoke_content="normal")
+        with (
+            patch(
+                "backend.nvidia_client.resolve_model",
+                return_value="moonshotai/kimi-k2.5",
+            ),
+            patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
+            patch("backend.nvidia_client._run_langchain_agent") as run_agent,
+        ):
+            answer = chat_once(
+                "api-key",
+                "question",
+                [],
+                enable_search=False,
+                thinking_mode=True,
+            )
+
+        self.assertEqual(answer, "normal")
+        run_agent.assert_not_called()
+
+    def test_should_use_agentic_flow_defaults_and_overrides(self):
+        self.assertTrue(_should_use_agentic_flow("qwen/qwen3.5-397b-a17b", None))
+        self.assertTrue(_should_use_agentic_flow("z-ai/glm5", None))
+        self.assertFalse(_should_use_agentic_flow("moonshotai/kimi-k2.5", None))
+        self.assertFalse(_should_use_agentic_flow("z-ai/glm5", False))
+        self.assertFalse(_should_use_agentic_flow("moonshotai/kimi-k2.5", True))
+        self.assertTrue(_should_use_agentic_flow("z-ai/glm5", True))
+
+    def test_stream_chat_qwen_agentic_react_auto_enabled_by_default(self):
+        with (
+            patch(
+                "backend.nvidia_client.resolve_model",
+                return_value="qwen/qwen3.5-397b-a17b",
+            ),
+            patch("backend.nvidia_client._build_chat_model", return_value=FakeClient()),
+            patch(
+                "backend.nvidia_client._run_langchain_agent",
+                return_value="final",
+            ) as run_agent,
+        ):
+            events = list(
+                stream_chat(
+                    "api-key",
+                    "question",
+                    [],
+                    enable_search=False,
+                    thinking_mode=True,
+                )
+            )
+
+        run_agent.assert_called_once()
+        self.assertIn({"type": "token", "content": "final"}, events)
+
+    def test_stream_chat_zai_agentic_react_emits_search_and_final_token(self):
+        def _fake_agent(*args, **kwargs):
+            emitter = kwargs.get("event_emitter")
+            if callable(emitter):
+                emitter({"type": "search_start", "query": "langchain react pattern"})
+                emitter({"type": "search_done", "results": [{"title": "r1"}]})
+                emitter({"type": "reasoning", "content": "agent thought"})
+            return "final agent answer"
+
+        with (
+            patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm5"),
+            patch("backend.nvidia_client._build_chat_model", return_value=FakeClient()),
+            patch(
+                "backend.nvidia_client._run_langchain_agent",
+                side_effect=_fake_agent,
+            ) as run_agent,
+        ):
+            events = list(
+                stream_chat(
+                    "api-key",
+                    "question",
+                    [],
+                    enable_search=False,
+                    agent_mode=True,
+                    thinking_mode=True,
+                )
+            )
+
+        run_agent.assert_called_once()
+        self.assertTrue(run_agent.call_args.kwargs.get("emit_reasoning"))
+        self.assertTrue(any(evt.get("type") == "context_usage" for evt in events))
+        self.assertIn({"type": "search_start", "query": "langchain react pattern"}, events)
+        self.assertTrue(any(evt.get("type") == "search_done" for evt in events))
+        self.assertIn({"type": "reasoning", "content": "agent thought"}, events)
+        self.assertIn({"type": "token", "content": "final agent answer"}, events)
+        self.assertEqual(events[-1]["type"], "done")
+
+    def test_stream_chat_agent_mode_emits_events_before_agent_finishes(self):
+        def _fake_agent(*args, **kwargs):
+            emitter = kwargs.get("event_emitter")
+            if callable(emitter):
+                emitter({"type": "search_start", "query": "early-query"})
+            time.sleep(0.3)
+            return "final"
+
+        with (
+            patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm5"),
+            patch("backend.nvidia_client._build_chat_model", return_value=FakeClient()),
+            patch(
+                "backend.nvidia_client._run_langchain_agent",
+                side_effect=_fake_agent,
+            ),
+        ):
+            events = stream_chat(
+                "api-key",
+                "question",
+                [],
+                enable_search=False,
+                agent_mode=True,
+                thinking_mode=True,
+            )
+            first = next(events)
+            start = time.monotonic()
+            second = next(events)
+            elapsed = time.monotonic() - start
+
+        self.assertEqual(first["type"], "context_usage")
+        self.assertEqual(second, {"type": "search_start", "query": "early-query"})
+        self.assertLess(elapsed, 0.2)
 
 
 if __name__ == "__main__":

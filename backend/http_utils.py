@@ -1,4 +1,6 @@
-﻿import json
+from __future__ import annotations
+
+import json
 import mimetypes
 from pathlib import Path
 
@@ -26,8 +28,11 @@ def init_sse(handler) -> None:
     handler.end_headers()
 
 
-def send_sse_event(handler, payload: dict) -> None:
-    body = json.dumps(payload, ensure_ascii=False)
+def send_sse_event(handler, payload: dict, *, request_id: str | None = None) -> None:
+    enriched = {**payload, "v": 1}
+    if request_id:
+        enriched["request_id"] = request_id
+    body = json.dumps(enriched, ensure_ascii=False)
     handler.wfile.write(f"data: {body}\n\n".encode("utf-8"))
     handler.wfile.flush()
 

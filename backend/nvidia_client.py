@@ -1,261 +1,57 @@
-import os
-from contextlib import contextmanager
+﻿"""Facade module - public API for chat_once / stream_chat.
+
+All heavy logic has been extracted to:
+- model_profile: model construction, env helpers, invoke kwargs
+- message_builder: message assembly, media normalization, token estimation
+- agent_orchestrator: tool-calling agent loop
+- event_mapper: SSE event sequence generators
+- search_provider: unified search with event emission
+"""
+
+from __future__ import annotations
 
 from .config import resolve_model
+from .model_registry import supports
+from .search_provider import SearchProvider
 
-_MODEL_CONTEXT_WINDOW = {
-    "moonshotai/kimi-k2.5": 131072,
-    "qwen/qwen3.5-397b-a17b": 128000,
-    "z-ai/glm5": 128000,
-}
-_MAX_COMPLETION_TOKENS_LIMIT = 16384
+from .model_profile import build_chat_model as _build_chat_model
+from .model_profile import proxy_env_guard as _proxy_env_guard
+from .model_profile import stream_or_invoke_kwargs as _stream_or_invoke_kwargs
 
+from .message_builder import (
+    build_messages as _build_messages,
+    build_user_content as _build_user_content,
+    context_usage_payload as _context_usage_payload,
+    estimate_tokens_from_messages as _estimate_tokens_from_messages,
+    extract_text as _extract_text,
+    history_as_text as _history_as_text,
+    normalize_image_data_urls as _normalize_image_data_urls,
+    normalize_media_data_urls as _normalize_media_data_urls,
+)
 
-def _int_env(name: str, default: int, min_value: int) -> int:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value >= min_value else min_value
+from .agent_orchestrator import run_agent as _run_langchain_agent
 
-
-def _float_env(name: str, default: float, min_value: float) -> float:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value >= min_value else min_value
-
-
-def _output_tokens() -> int:
-    requested = _int_env("NVIDIA_MAX_COMPLETION_TOKENS", _MAX_COMPLETION_TOKENS_LIMIT, 256)
-    return min(requested, _MAX_COMPLETION_TOKENS_LIMIT)
-
-
-def _normalize_media_data_urls(media) -> list[str]:
-    """
-    Normalize media data URLs for multimodal chat.
-
-    Notes:
-    - We forward both image and video data URLs.
-    - Message assembly decides `image_url` vs `video_url` payload type.
-    """
-    if not isinstance(media, list):
-        return []
-
-    normalized = []
-    for item in media[:5]:
-        if not isinstance(item, str):
-            continue
-        value = item.strip()
-        if not (value.startswith("data:image/") or value.startswith("data:video/")):
-            continue
-        if ";base64," not in value:
-            continue
-        normalized.append(value)
-    return normalized
-
-
-def _normalize_image_data_urls(images) -> list[str]:
-    """Backward-compatible alias used by older tests/callers."""
-    return _normalize_media_data_urls(images)
-
-
-@contextmanager
-def _proxy_env_guard():
-    use_system_proxy = os.getenv("NVIDIA_USE_SYSTEM_PROXY", "").strip() == "1"
-    if use_system_proxy:
-        yield
-        return
-
-    proxy_keys = [
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-    ]
-    backup = {key: os.environ.get(key) for key in proxy_keys}
-
-    try:
-        for key in proxy_keys:
-            os.environ.pop(key, None)
-        yield
-    finally:
-        for key, value in backup.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
-def _build_chat_model(api_key: str, model: str, thinking_mode: bool = True):
-    try:
-        from langchain_nvidia_ai_endpoints import ChatNVIDIA
-    except ImportError as exc:
-        raise RuntimeError(
-            "LangChain NVIDIA package missing. Activate .venv and install requirements.txt first."
-        ) from exc
-
-    timeout_seconds = _float_env("NVIDIA_TIMEOUT_SECONDS", 300.0, 30.0)
-    temperature = 1.0
-    top_p = 1.0
-    if model.startswith("moonshotai/"):
-        temperature = 1.0 if thinking_mode else 0.6
-    elif model.startswith("qwen/"):
-        temperature = 0.6
-        top_p = 0.95
-    elif model.startswith("z-ai/"):
-        temperature = 0.7
-
-    params = {
-        "model": model,
-        "api_key": api_key,
-        "temperature": temperature,
-        "top_p": top_p,
-        "max_completion_tokens": _output_tokens(),
-        "timeout": timeout_seconds,
-    }
-
-    if model.startswith("z-ai/"):
-        params["extra_body"] = {
-            "chat_template_kwargs": {
-                "enable_thinking": bool(thinking_mode),
-                "clear_thinking": not bool(thinking_mode),
-            }
-        }
-
-    return ChatNVIDIA(**params)
-
-
-def _build_user_content(model: str, message: str, media: list[str]):
-    if not _supports_images(model) or not media:
-        return message
-
-    content = [{"type": "text", "text": message}]
-    for url in media:
-        if url.startswith("data:video/"):
-            content.append({"type": "video_url", "video_url": {"url": url}})
-        else:
-            content.append({"type": "image_url", "image_url": {"url": url}})
-    return content
-
-
-def _build_messages(
-    model: str,
-    message: str,
-    history: list,
-    search_context: str = "",
-    images: list[str] | None = None,
-) -> list[dict]:
-    messages: list[dict] = []
-
-    if search_context:
-        messages.append({"role": "system", "content": search_context})
-
-    if isinstance(history, list):
-        for item in history[-20:]:
-            if not isinstance(item, dict):
-                continue
-            role = item.get("role")
-            content = item.get("content")
-            if role in {"user", "assistant", "system"} and isinstance(content, str):
-                messages.append({"role": role, "content": content})
-
-    user_content = _build_user_content(model, message, images or [])
-    messages.append({"role": "user", "content": user_content})
-    return messages
+from .event_mapper import stream_agentic, stream_direct
 
 
 def _supports_thinking(model: str) -> bool:
-    return (
-        model.startswith("moonshotai/")
-        or model.startswith("qwen/")
-        or model.startswith("z-ai/")
-    )
+    return supports(model, "thinking")
 
 
 def _supports_images(model: str) -> bool:
-    return model.startswith("moonshotai/")
+    return supports(model, "media")
 
 
-def _stream_or_invoke_kwargs(model: str, thinking_mode: bool) -> dict:
-    kwargs = {"max_completion_tokens": _output_tokens()}
-    if model.startswith("moonshotai/"):
-        kwargs["chat_template_kwargs"] = {"thinking": bool(thinking_mode)}
-    elif model.startswith("qwen/"):
-        kwargs["chat_template_kwargs"] = {"enable_thinking": bool(thinking_mode)}
-    return kwargs
+def _is_agentic_model(model: str) -> bool:
+    return supports(model, "agent")
 
 
-def _extract_text(content) -> str:
-    if isinstance(content, str):
-        return content
-
-    if isinstance(content, list):
-        parts = []
-        for part in content:
-            if isinstance(part, str):
-                parts.append(part)
-                continue
-            if isinstance(part, dict):
-                text = part.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "".join(parts)
-
-    return "" if content is None else str(content)
-
-
-def _estimate_tokens_from_messages(messages: list[dict[str, str]]) -> int:
-    total_chars = 0
-    count = 0
-    for item in messages:
-        if not isinstance(item, dict):
-            continue
-        content = item.get("content")
-        if isinstance(content, str):
-            total_chars += len(content)
-            count += 1
-            continue
-        if isinstance(content, list):
-            for part in content:
-                if isinstance(part, str):
-                    total_chars += len(part)
-                    continue
-                if isinstance(part, dict):
-                    text = part.get("text")
-                    if isinstance(text, str):
-                        total_chars += len(text)
-                    image_url = (part.get("image_url") or {}).get("url")
-                    if isinstance(image_url, str):
-                        total_chars += min(len(image_url), 256)
-                    video_url = (part.get("video_url") or {}).get("url")
-                    if isinstance(video_url, str):
-                        total_chars += min(len(video_url), 256)
-            count += 1
-
-    return max(1, total_chars // 4 + count * 4)
-
-
-def _context_usage_payload(model: str, phase: str, messages: list[dict[str, str]]) -> dict:
-    window_total = _MODEL_CONTEXT_WINDOW.get(model, 128000)
-    used = _estimate_tokens_from_messages(messages)
-    ratio = used / window_total if window_total > 0 else 0.0
-    return {
-        "model": model,
-        "phase": phase,
-        "used_estimated_tokens": used,
-        "window_total_tokens": window_total,
-        "usage_ratio": round(ratio, 4),
-    }
+def _should_use_agentic_flow(model: str, agent_mode: bool | None) -> bool:
+    if agent_mode is True:
+        return _is_agentic_model(model)
+    if agent_mode is False:
+        return False
+    return _is_agentic_model(model)
 
 
 def _run_web_search(
@@ -263,17 +59,15 @@ def _run_web_search(
     num_results: int = 5,
     include_page_content: bool = True,
 ):
-    """Execute web search and return (context_str, results_list) or ("", [])."""
+    """Execute web search and return (context_str, results_list)."""
     from .web_search import format_search_context, web_search
 
-    results = web_search(
-        message,
-        num_results=num_results,
-        include_page_content=include_page_content,
-    )
+    results = web_search(message, num_results=num_results, include_page_content=include_page_content)
     context = format_search_context(message, results)
     return context, results
 
+
+# Public API
 
 def chat_once(
     api_key: str,
@@ -281,23 +75,39 @@ def chat_once(
     history: list,
     model: str | None = None,
     enable_search: bool = False,
+    agent_mode: bool | None = None,
     thinking_mode: bool = True,
     images: list[str] | None = None,
 ) -> str:
     chosen_model = resolve_model(model)
     client = _build_chat_model(api_key, chosen_model, thinking_mode=thinking_mode)
 
-    search_context = ""
+    if _should_use_agentic_flow(chosen_model, agent_mode):
+        noop_provider = SearchProvider(_run_web_search, lambda evt: None)
+        agent_events: list[dict] = []
+        with _proxy_env_guard():
+            return _run_langchain_agent(
+                client=client,
+                model=chosen_model,
+                message=message,
+                history=history,
+                thinking_mode=thinking_mode,
+                search_provider=noop_provider,
+                event_collector=agent_events,
+            )
+
+    initial_search_context = ""
     if enable_search:
-        search_context, _ = _run_web_search(message)
+        initial_search_context, _ = _run_web_search(message)
 
     normalized_images = _normalize_media_data_urls(images)
-    messages = _build_messages(chosen_model, message, history, search_context, normalized_images)
+    messages = _build_messages(
+        chosen_model, message, history, initial_search_context, normalized_images,
+    )
 
     with _proxy_env_guard():
         response = client.invoke(
-            messages,
-            **_stream_or_invoke_kwargs(chosen_model, thinking_mode),
+            messages, **_stream_or_invoke_kwargs(chosen_model, thinking_mode),
         )
 
     return _extract_text(getattr(response, "content", ""))
@@ -309,41 +119,45 @@ def stream_chat(
     history: list,
     model: str | None = None,
     enable_search: bool = False,
+    agent_mode: bool | None = None,
     thinking_mode: bool = True,
     images: list[str] | None = None,
 ):
     chosen_model = resolve_model(model)
     client = _build_chat_model(api_key, chosen_model, thinking_mode=thinking_mode)
-
-    search_context = ""
-    if enable_search:
-        yield {"type": "search_start", "query": message}
-        try:
-            search_context, results = _run_web_search(message)
-            yield {"type": "search_done", "results": results}
-        except Exception as exc:  # noqa: BLE001
-            yield {"type": "search_error", "error": str(exc)}
-
-    normalized_images = _normalize_media_data_urls(images)
-    messages = _build_messages(chosen_model, message, history, search_context, normalized_images)
-
-    stream_kwargs = _stream_or_invoke_kwargs(chosen_model, thinking_mode)
     emit_reasoning = _supports_thinking(chosen_model) and bool(thinking_mode)
 
-    with _proxy_env_guard():
-        yield {
-            "type": "context_usage",
-            "usage": _context_usage_payload(chosen_model, "single", messages),
-        }
+    if _should_use_agentic_flow(chosen_model, agent_mode):
+        yield from stream_agentic(
+            client=client,
+            model=chosen_model,
+            message=message,
+            history=history,
+            thinking_mode=thinking_mode,
+            emit_reasoning=emit_reasoning,
+            run_web_search=_run_web_search,
+            run_agent=_run_langchain_agent,
+        )
+        return
 
-        for chunk in client.stream(messages, **stream_kwargs):
-            additional = getattr(chunk, "additional_kwargs", {}) or {}
-            reasoning = additional.get("reasoning_content")
-            if emit_reasoning and isinstance(reasoning, str) and reasoning:
-                yield {"type": "reasoning", "content": reasoning}
+    event_buffer: list[dict] = []
+    provider = SearchProvider(_run_web_search, event_buffer.append)
 
-            token = _extract_text(getattr(chunk, "content", ""))
-            if token:
-                yield {"type": "token", "content": token}
+    initial_search_context = ""
+    if enable_search:
+        initial_search_context, _ = provider.search_with_events(message)
+        yield from event_buffer
+        event_buffer.clear()
 
-    yield {"type": "done", "finish_reason": "stop"}
+    normalized_images = _normalize_media_data_urls(images)
+    messages = _build_messages(
+        chosen_model, message, history, initial_search_context, normalized_images,
+    )
+
+    yield from stream_direct(
+        client=client,
+        model=chosen_model,
+        messages=messages,
+        thinking_mode=thinking_mode,
+        emit_reasoning=emit_reasoning,
+    )

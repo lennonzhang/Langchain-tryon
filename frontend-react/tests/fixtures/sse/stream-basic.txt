@@ -1,0 +1,6 @@
+data: {"type":"context_usage","usage":{"phase":"single","used_estimated_tokens":120,"window_total_tokens":128000,"usage_ratio":0.0009,"model":"moonshotai/kimi-k2.5"}}
+
+data: {"type":"token","content":"Hello from SSE"}
+
+data: {"type":"done","finish_reason":"stop"}
+

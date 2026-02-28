@@ -1,0 +1,4 @@
+data: {"type":"search_start","query":"in-progress"}
+
+data: {"type":"reasoning","content":"Still thinking..."}
+

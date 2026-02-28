@@ -5,6 +5,10 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
+      "source": "/api/capabilities",
+      "destination": "/api/capabilities.py"
+    },
+    {
       "source": "/api/chat",
       "destination": "/api/chat.py"
     },
