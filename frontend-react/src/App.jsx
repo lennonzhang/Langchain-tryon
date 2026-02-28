@@ -13,7 +13,7 @@ export default function App() {
     useAttachments(supportsMedia);
   const [webSearch, setWebSearch] = useState(false);
   const [thinkingMode, setThinkingMode] = useState(true);
-  const { messages, input, setInput, isPending, onSubmit, messagesRef } = useChatStream({
+  const { messages, input, setInput, isPending, onSubmit, messagesRef, handleMessagesScroll } = useChatStream({
     model,
     webSearch,
     thinkingMode,
@@ -49,7 +49,12 @@ export default function App() {
           <span>{isPending ? "Generating response..." : "Ready"}</span>
         </div>
 
-        <MessageList messages={messages} isPending={isPending} ref={messagesRef} />
+        <MessageList
+          messages={messages}
+          isPending={isPending}
+          ref={messagesRef}
+          onScroll={handleMessagesScroll}
+        />
 
         <Composer
           models={models}

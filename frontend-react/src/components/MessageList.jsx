@@ -2,9 +2,9 @@ import { forwardRef } from "react";
 import RichBlock from "./RichBlock";
 import StreamMessage from "./StreamMessage";
 
-const MessageList = forwardRef(function MessageList({ messages, isPending }, ref) {
+const MessageList = forwardRef(function MessageList({ messages, isPending, onScroll }, ref) {
   return (
-    <div id="messages" className="messages" ref={ref} data-testid="messages-list">
+    <div id="messages" className="messages" ref={ref} data-testid="messages-list" onScroll={onScroll}>
       {messages.map((msg) => {
         if (msg.role === "assistant_stream") {
           return <StreamMessage key={msg.id} msg={msg} isPending={isPending} />;

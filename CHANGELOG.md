@@ -8,6 +8,30 @@ All notable changes to this repository are documented in this file.
 
 This release consolidates the backend into a modular architecture, introduces a model capabilities API consumed by frontend, hardens SSE protocol behavior, refactors frontend into hooks/components/utils, and significantly expands test coverage.
 
+### Frontend Auto-Scroll Hardening (follow-up)
+
+- Fixed chat auto-scroll stickiness regression in `frontend-react/src/hooks/useChatStream.js`:
+  - switched from post-update near-bottom inference to scroll-intent tracking
+  - added `handleMessagesScroll` + `stickToBottomRef` with a `150px` threshold
+- Wired scroll event propagation through:
+  - `frontend-react/src/components/MessageList.jsx`
+  - `frontend-react/src/App.jsx`
+- Added robust frontend behavior tests in `frontend-react/src/__tests__/App.behavior.test.jsx` for:
+  - stick-to-bottom while streaming
+  - no forced scroll while user reads history
+  - resume follow when user returns near bottom
+  - large height jump handling
+  - threshold edge cases (`149/150/151`)
+  - unmount safety during deferred animation callbacks
+- Added/updated e2e coverage in `frontend-react/tests/e2e/chat-stream.spec.ts`:
+  - follow behavior at bottom
+  - scroll-up disables follow until user returns
+- Improved e2e SSE fixture reliability in `frontend-react/tests/helpers/mockSse.ts`:
+  - normalize CRLF to LF for parser compatibility
+  - route matcher widened to `**/api/chat/stream*`
+  - send action uses `#sendBtn` click for stable submission
+- Added long-stream fixture: `frontend-react/tests/fixtures/sse/stream-multi-token.txt`
+
 ### Backend
 
 - Refactored `backend/nvidia_client.py` into a facade and extracted heavy logic into:

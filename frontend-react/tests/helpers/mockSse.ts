@@ -6,8 +6,8 @@ import { Page } from "@playwright/test";
 export async function mockSseFromFixture(page: Page, fixtureName: string) {
   const here = dirname(fileURLToPath(import.meta.url));
   const fixturePath = resolve(here, "..", "fixtures", "sse", fixtureName);
-  const body = readFileSync(fixturePath, "utf8");
-  await page.route("**/api/chat/stream", async (route) => {
+  const body = readFileSync(fixturePath, "utf8").replace(/\r\n/g, "\n");
+  await page.route("**/api/chat/stream*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "text/event-stream",
@@ -27,8 +27,8 @@ export async function mockDelayedSseFromFixture(
 ) {
   const here = dirname(fileURLToPath(import.meta.url));
   const fixturePath = resolve(here, "..", "fixtures", "sse", fixtureName);
-  const body = readFileSync(fixturePath, "utf8");
-  await page.route("**/api/chat/stream", async (route) => {
+  const body = readFileSync(fixturePath, "utf8").replace(/\r\n/g, "\n");
+  await page.route("**/api/chat/stream*", async (route) => {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
     await route.fulfill({
       status: 200,
@@ -45,7 +45,7 @@ export async function mockDelayedSseFromFixture(
 export async function sendMessage(page: Page, text: string) {
   const textarea = page.locator("textarea");
   await textarea.fill(text);
-  await textarea.press("Enter");
+  await page.locator("#sendBtn").click();
 }
 
 export async function stabilizeForScreenshot(page: Page) {

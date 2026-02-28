@@ -43,3 +43,5 @@ frontend/dist/
 frontend-react/coverage/
 frontend/coverage/
 frontend-react/preview*.log
+frontend-react/test-results/
+frontend-react/playwright-report/
