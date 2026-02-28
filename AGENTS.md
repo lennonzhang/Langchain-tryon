@@ -51,6 +51,8 @@ Repository-level guide for coding agents.
 - Use `SearchProvider` for both agent and non-agent search event emission.
 - Do not rename SSE events silently.
 - Update tests + docs together.
+- Frontend chat auto-scroll policy: follow only when user is near bottom (threshold `150px`); do not force scroll after user scrolls up.
+- For Playwright SSE fixtures, normalize line endings to LF before parsing.
 
 ## Validation
 
@@ -58,6 +60,7 @@ Repository-level guide for coding agents.
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 cd frontend-react
 pnpm test
+pnpm test:e2e
 pnpm run build
 ```
 
@@ -79,8 +82,12 @@ pnpm run build
 - Frontend hooks: `frontend-react/src/hooks/*`
 - Frontend components: `frontend-react/src/components/*`
 - Frontend utils: `frontend-react/src/utils/*`
+- Message list component: `frontend-react/src/components/MessageList.jsx`
 - Stream parser: `frontend-react/src/stream.js`
 - Backend tests: `tests/test_*.py`
 - Frontend tests: `frontend-react/src/__tests__/*`, `frontend-react/tests/*`
+- Frontend e2e spec: `frontend-react/tests/e2e/chat-stream.spec.ts`
+- Frontend e2e helper: `frontend-react/tests/helpers/mockSse.ts`
+- Frontend SSE fixtures: `frontend-react/tests/fixtures/sse/*`
 - Vercel wrappers: `api/capabilities.py`, `api/chat.py`, `api/chat/stream.py`
 - Release notes: `CHANGELOG.md`

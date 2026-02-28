@@ -24,6 +24,7 @@ pnpm install
 pnpm run dev
 pnpm run build
 pnpm test
+pnpm test:e2e
 ```
 
 ## Runtime Baseline
@@ -67,7 +68,11 @@ pnpm test
 - `frontend-react/src/hooks/useCapabilities.js`: capability bootstrap and model selection
 - `frontend-react/src/hooks/useChatStream.js`: streaming state machine
 - `frontend-react/src/hooks/useAttachments.js`: media attachment workflow
+- `frontend-react/src/components/MessageList.jsx`: message list container + scroll event boundary
 - `frontend-react/src/stream.js`: SSE parser
+- `frontend-react/tests/e2e/chat-stream.spec.ts`: end-to-end chat stream behavior coverage
+- `frontend-react/tests/helpers/mockSse.ts`: e2e SSE route mocking + fixture normalization
+- `frontend-react/tests/fixtures/sse/*`: SSE fixture files (including multi-token stream cases)
 - `api/capabilities.py`: serverless capabilities endpoint
 - `api/chat.py`, `api/chat/stream.py`: serverless chat wrappers
 
@@ -90,6 +95,11 @@ SSE events:
   - on: qwen, glm
   - off: kimi
 - If model supports reasoning and `thinking_mode=true`, stream reasoning events
+
+## Frontend Notes
+
+- Chat auto-scroll rule: only follow stream when message list is near bottom (`<= 150px`); preserve user position when they scroll up.
+- E2E SSE fixture handling should use LF-normalized content to match `frontend-react/src/stream.js` block splitting.
 
 ## Documentation Rule
 

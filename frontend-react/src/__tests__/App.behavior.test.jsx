@@ -40,9 +40,50 @@ function deferred() {
   return { promise, resolve };
 }
 
+function installScrollMetrics(el, { scrollHeight = 1000, clientHeight = 300, scrollTop = 700 } = {}) {
+  let currentScrollHeight = scrollHeight;
+  let currentClientHeight = clientHeight;
+  let currentScrollTop = scrollTop;
+
+  Object.defineProperty(el, "scrollHeight", {
+    configurable: true,
+    get: () => currentScrollHeight,
+  });
+  Object.defineProperty(el, "clientHeight", {
+    configurable: true,
+    get: () => currentClientHeight,
+  });
+  Object.defineProperty(el, "scrollTop", {
+    configurable: true,
+    get: () => currentScrollTop,
+    set: (value) => {
+      currentScrollTop = Number(value);
+    },
+  });
+
+  return {
+    get scrollTop() {
+      return currentScrollTop;
+    },
+    get distanceToBottom() {
+      return currentScrollHeight - currentScrollTop - currentClientHeight;
+    },
+    setScrollTop(value) {
+      currentScrollTop = Number(value);
+    },
+    setScrollHeight(value) {
+      currentScrollHeight = Number(value);
+    },
+  };
+}
+
 describe("App behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      cb(0);
+      return 1;
+    });
     mockFetchOk();
     class MockFileReader {
       readAsDataURL(file) {
@@ -53,6 +94,10 @@ describe("App behavior", () => {
     global.FileReader = MockFileReader;
     global.URL.createObjectURL = vi.fn(() => "blob:mock");
     global.URL.revokeObjectURL = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("exports shortModelName helper", () => {
@@ -225,6 +270,203 @@ describe("App behavior", () => {
 
     await waitFor(() => {
       expect(container.querySelector(".model-trigger-label")?.textContent).toBe("kimi-k2.5");
+    });
+  });
+
+  describe("auto-scroll behavior", () => {
+    it("sticks to bottom while streaming when user is near bottom", async () => {
+      parseEventStream.mockImplementation(async (_reader, onEvent) => {
+        onEvent({ type: "token", content: "chunk-1 " });
+        onEvent({ type: "token", content: "chunk-2 " });
+        onEvent({ type: "token", content: "chunk-3" });
+        onEvent({ type: "done" });
+      });
+
+      const { container } = render(<App />);
+      const messagesEl = await screen.findByTestId("messages-list");
+      const metrics = installScrollMetrics(messagesEl, {
+        scrollHeight: 1000,
+        clientHeight: 300,
+        scrollTop: 700,
+      });
+
+      await userEvent.type(screen.getByRole("textbox"), "hello");
+      fireEvent.submit(container.querySelector("form.composer"));
+
+      await waitFor(() => {
+        expect(screen.getByText("chunk-1 chunk-2 chunk-3")).toBeInTheDocument();
+      });
+      expect(metrics.distanceToBottom).toBeLessThanOrEqual(0);
+      expect(metrics.scrollTop).toBe(1000);
+    });
+
+    it("does not auto-scroll when user has scrolled away from bottom", async () => {
+      parseEventStream.mockImplementation(async (_reader, onEvent) => {
+        onEvent({ type: "token", content: "x".repeat(80) });
+        onEvent({ type: "done" });
+      });
+
+      const { container } = render(<App />);
+      const messagesEl = await screen.findByTestId("messages-list");
+      const metrics = installScrollMetrics(messagesEl, {
+        scrollHeight: 1200,
+        clientHeight: 300,
+        scrollTop: 900,
+      });
+
+      metrics.setScrollTop(300);
+      fireEvent.scroll(messagesEl);
+
+      await userEvent.type(screen.getByRole("textbox"), "hello");
+      fireEvent.submit(container.querySelector("form.composer"));
+
+      await waitFor(() => {
+        expect(screen.getByText("x".repeat(80))).toBeInTheDocument();
+      });
+      expect(metrics.scrollTop).toBe(300);
+      expect(metrics.distanceToBottom).toBe(600);
+    });
+
+    it("resumes auto-scroll after user returns near bottom", async () => {
+      parseEventStream.mockImplementation(async (_reader, onEvent) => {
+        onEvent({ type: "token", content: "first" });
+        onEvent({ type: "done" });
+      });
+
+      const { container } = render(<App />);
+      const messagesEl = await screen.findByTestId("messages-list");
+      const metrics = installScrollMetrics(messagesEl, {
+        scrollHeight: 1200,
+        clientHeight: 300,
+        scrollTop: 300,
+      });
+
+      fireEvent.scroll(messagesEl);
+
+      await userEvent.type(screen.getByRole("textbox"), "hello");
+      fireEvent.submit(container.querySelector("form.composer"));
+      await waitFor(() => {
+        expect(screen.getByText("first")).toBeInTheDocument();
+      });
+      expect(metrics.scrollTop).toBe(300);
+
+      metrics.setScrollTop(900);
+      fireEvent.scroll(messagesEl);
+
+      parseEventStream.mockImplementationOnce(async (_reader, onEvent) => {
+        onEvent({ type: "token", content: "second" });
+        onEvent({ type: "done" });
+      });
+      await userEvent.type(screen.getByRole("textbox"), "again");
+      fireEvent.submit(container.querySelector("form.composer"));
+      await waitFor(() => {
+        expect(screen.getByText("second")).toBeInTheDocument();
+      });
+      expect(metrics.scrollTop).toBe(1200);
+      expect(metrics.distanceToBottom).toBeLessThanOrEqual(0);
+    });
+
+    it("handles large height jump without losing stickiness", async () => {
+      parseEventStream.mockImplementation(async (_reader, onEvent) => {
+        onEvent({ type: "token", content: "long".repeat(200) });
+        onEvent({ type: "done" });
+      });
+
+      const { container } = render(<App />);
+      const messagesEl = await screen.findByTestId("messages-list");
+      const metrics = installScrollMetrics(messagesEl, {
+        scrollHeight: 1000,
+        clientHeight: 300,
+        scrollTop: 700,
+      });
+
+      const scrollTopSetter = Object.getOwnPropertyDescriptor(messagesEl, "scrollTop").set;
+      Object.defineProperty(messagesEl, "scrollTop", {
+        configurable: true,
+        get: () => metrics.scrollTop,
+        set: (value) => {
+          metrics.setScrollHeight(1500);
+          scrollTopSetter(value);
+        },
+      });
+
+      await userEvent.type(screen.getByRole("textbox"), "jump");
+      fireEvent.submit(container.querySelector("form.composer"));
+      await waitFor(() => {
+        expect(screen.getByText("long".repeat(200))).toBeInTheDocument();
+      });
+      expect(metrics.scrollTop).toBe(1500);
+      expect(metrics.distanceToBottom).toBe(-300);
+    });
+
+    it("supports threshold edge cases 149/150/151", async () => {
+      parseEventStream.mockImplementation(async (_reader, onEvent) => {
+        onEvent({ type: "token", content: "edge" });
+        onEvent({ type: "done" });
+      });
+
+      const { container } = render(<App />);
+      const messagesEl = await screen.findByTestId("messages-list");
+      const metrics = installScrollMetrics(messagesEl, {
+        scrollHeight: 1000,
+        clientHeight: 300,
+        scrollTop: 551,
+      });
+
+      fireEvent.scroll(messagesEl);
+      await userEvent.type(screen.getByRole("textbox"), "149");
+      fireEvent.submit(container.querySelector("form.composer"));
+      await waitFor(() => {
+        expect(screen.getByText("edge")).toBeInTheDocument();
+      });
+      expect(metrics.scrollTop).toBe(1000);
+
+      metrics.setScrollTop(550);
+      fireEvent.scroll(messagesEl);
+      parseEventStream.mockImplementationOnce(async (_reader, onEvent) => {
+        onEvent({ type: "token", content: "edge-150" });
+        onEvent({ type: "done" });
+      });
+      await userEvent.type(screen.getByRole("textbox"), "150");
+      fireEvent.submit(container.querySelector("form.composer"));
+      await waitFor(() => {
+        expect(screen.getByText("edge-150")).toBeInTheDocument();
+      });
+      expect(metrics.scrollTop).toBe(1000);
+
+      metrics.setScrollTop(549);
+      fireEvent.scroll(messagesEl);
+      parseEventStream.mockImplementationOnce(async (_reader, onEvent) => {
+        onEvent({ type: "token", content: "edge-151" });
+        onEvent({ type: "done" });
+      });
+      await userEvent.type(screen.getByRole("textbox"), "151");
+      fireEvent.submit(container.querySelector("form.composer"));
+      await waitFor(() => {
+        expect(screen.getByText("edge-151")).toBeInTheDocument();
+      });
+      expect(metrics.scrollTop).toBe(549);
+    });
+
+    it("does not crash when requestAnimationFrame executes after list unmount", async () => {
+      parseEventStream.mockImplementation(async (_reader, onEvent) => {
+        onEvent({ type: "token", content: "safe" });
+        onEvent({ type: "done" });
+      });
+
+      let scheduled;
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+        scheduled = cb;
+        return 1;
+      });
+
+      const { container, unmount } = render(<App />);
+      await screen.findByTestId("messages-list");
+      await userEvent.type(screen.getByRole("textbox"), "safe");
+      fireEvent.submit(container.querySelector("form.composer"));
+      unmount();
+
+      expect(() => scheduled?.(0)).not.toThrow();
     });
   });
 });

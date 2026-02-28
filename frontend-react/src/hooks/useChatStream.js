@@ -11,19 +11,27 @@ export function useChatStream({
   attachments,
   clearAttachments,
 }) {
+  const autoScrollThresholdPx = 150;
   const messagesRef = useRef(null);
+  const stickToBottomRef = useRef(true);
   const idRef = useRef(2);
   const [messages, setMessages] = useState([{ id: 1, role: "assistant", content: CONNECTED_TEXT }]);
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState("");
   const [isPending, setPending] = useState(false);
 
+  function handleMessagesScroll(event) {
+    const el = event?.currentTarget || messagesRef.current;
+    if (!el) return;
+
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceToBottom <= autoScrollThresholdPx;
+  }
+
   useEffect(() => {
     const el = messagesRef.current;
     if (!el) return;
-
-    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
-    if (!isNearBottom) return;
+    if (!stickToBottomRef.current) return;
 
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
@@ -183,5 +191,5 @@ export function useChatStream({
     }
   }
 
-  return { messages, input, setInput, isPending, onSubmit, messagesRef };
+  return { messages, input, setInput, isPending, onSubmit, messagesRef, handleMessagesScroll };
 }
