@@ -72,6 +72,7 @@ body,
 }
 
 body {
+  overflow: hidden;
   font-family: "Inter", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   font-size: 15px;
   line-height: 1.6;
@@ -102,8 +103,11 @@ body::after {
 .wrap {
   position: relative;
   max-width: 1100px;
-  margin: 28px auto;
-  padding: 0 20px;
+  height: 100dvh;
+  margin: 0 auto;
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---- Background decorations ---- */
@@ -165,7 +169,8 @@ body::after {
   background: var(--panel);
   border: 1px solid rgba(203, 213, 225, 0.6);
   border-radius: var(--radius-xl);
-  min-height: min(90dvh, 960px);
+  flex: 1;
+  min-height: 0;
   box-shadow: var(--shadow-lg);
   overflow: hidden;
   display: grid;
@@ -305,8 +310,7 @@ body::after {
 /* ---- Messages area ---- */
 
 .messages {
-  min-height: 44dvh;
-  max-height: 66dvh;
+  min-height: 0;
   overflow: auto;
   padding: 20px;
   display: flex;
@@ -314,6 +318,7 @@ body::after {
   gap: 14px;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
+  overscroll-behavior: contain;
 }
 
 .messages:hover {
@@ -1238,14 +1243,14 @@ input:disabled {
 @keyframes msg-in {
   0% {
     opacity: 0;
-    transform: translateY(16px) scale(0.97);
+    transform: translateY(6px) scale(0.99);
   }
   60% {
     opacity: 1;
-    transform: translateY(-3px) scale(1.005);
+    transform: translateY(-1px) scale(1.002);
   }
   80% {
-    transform: translateY(1px) scale(0.999);
+    transform: translateY(0.5px) scale(1);
   }
   100% {
     opacity: 1;
@@ -1256,7 +1261,7 @@ input:disabled {
 @keyframes section-enter {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translateY(4px) scale(0.99);
   }
   to {
     opacity: 1;
@@ -1359,7 +1364,6 @@ input:disabled {
   }
 
   .chat {
-    min-height: 100dvh;
     border-radius: 0;
     border-left: 0;
     border-right: 0;
@@ -1385,7 +1389,6 @@ input:disabled {
 
   .messages {
     padding: 14px;
-    max-height: none;
     gap: 12px;
   }
 
