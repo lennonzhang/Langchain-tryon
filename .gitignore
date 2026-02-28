@@ -24,7 +24,6 @@ venv/
 .vercel/
 .tools/
 
-.github/workflows/vercel-deploy.yml
 scripts/list_chatnvidia_models.py
 scripts/models-*.txt
 
