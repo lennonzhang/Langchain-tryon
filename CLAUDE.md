@@ -39,14 +39,22 @@ pnpm test:e2e
 - `backend/model_registry.py`: model capability source of truth
 - `backend/model_profile.py`: model params/build logic
 - `backend/message_builder.py`: message/media assembly + token estimate
-- `backend/agent_orchestrator.py`: `create_tool_calling_agent` flow
+- `backend/agent_graph.py`: LangGraph StateGraph (Plan → Act → Observe → Reflect)
+- `backend/agent_orchestrator.py`: agent entry point, builds graph and invokes
 - `backend/event_mapper.py`: direct/agent streaming event generation
 - `backend/search_provider.py`: unified search event emission
-- `backend/tools_registry.py`: LangChain tools
+- `backend/tools_registry.py`: LangChain tools (web_search, read_url, python_exec)
 - `backend/schemas.py`: request schema parsing
 - `backend/chat_handlers.py`: route handlers
 - `backend/http_utils.py`: JSON/SSE helpers
 - `frontend-react/src/App.jsx`: frontend composition root
+- `frontend-react/src/app/AppProviders.jsx`: frontend provider root (query + repository)
+- `frontend-react/src/features/sessions/*`: session list/data hooks
+- `frontend-react/src/features/chat/*`: send pipeline, stream controller, event mapping
+- `frontend-react/src/entities/session/*`: session summaries + in-memory repository
+- `frontend-react/src/shared/store/chatUiStore.js`: global UI/runtime state
+- `frontend-react/src/shared/api/chatApiClient.js`: capabilities + stream transport
+- `frontend-react/src/shared/lib/sse/parseEventStream.js`: SSE parsing (LF/CRLF tolerant)
 - `frontend-react/src/hooks/*`, `components/*`, `utils/*`: frontend state and UI modules
 - `api/capabilities.py`, `api/chat.py`, `api/chat/stream.py`: Vercel wrappers
 
@@ -55,7 +63,8 @@ pnpm test:e2e
 - `backend/model_registry.py`: model capabilities/defaults source of truth
 - `backend/model_profile.py`: model construction and invoke/stream kwargs
 - `backend/message_builder.py`: history/media normalization, message construction
-- `backend/agent_orchestrator.py`: tool-calling agent execution
+- `backend/agent_graph.py`: LangGraph agent graph definition (nodes, edges, state)
+- `backend/agent_orchestrator.py`: agent entry point and graph invocation
 - `backend/event_mapper.py`: direct/agent streaming event generation
 - `backend/search_provider.py`: shared search event emitter
 - `backend/tools_registry.py`: LangChain tool definitions
@@ -65,6 +74,11 @@ pnpm test:e2e
 - `backend/nvidia_client.py`: facade entrypoint for chat logic
 - `backend/server.py`: local HTTP entrypoint and routing
 - `frontend-react/src/App.jsx`: app composition
+- `frontend-react/src/app/AppProviders.jsx`: app-level providers
+- `frontend-react/src/features/sessions/useSessions.js`: session query/mutation hooks
+- `frontend-react/src/features/chat/useSendMessage.js`: session-aware stream send pipeline
+- `frontend-react/src/features/chat/mapStreamEventToPatch.js`: stream event reducer
+- `frontend-react/src/shared/store/chatUiStore.js`: UI/runtime store
 - `frontend-react/src/hooks/useCapabilities.js`: capability bootstrap and model selection
 - `frontend-react/src/hooks/useChatStream.js`: streaming state machine
 - `frontend-react/src/hooks/useAttachments.js`: media attachment workflow
@@ -84,7 +98,8 @@ Request fields:
 
 SSE events:
 
-- `search_start`, `search_done`, `search_error`, `context_usage`, `reasoning`, `token`, `error`, `done`
+- Core: `search_start`, `search_done`, `search_error`, `context_usage`, `reasoning`, `token`, `error`, `done`
+- Agent: `agent_plan`, `agent_step_start`, `agent_step_end`, `tool_call`, `tool_result`, `agent_reflect`
 - Enrichment: `v: 1`, plus `request_id` when available
 - Error invariant: `error` then `done` (`finish_reason: "error"`)
 
@@ -105,5 +120,6 @@ SSE events:
 
 When behavior changes:
 
-- update `AGENTS.md`, `CLAUDE.md`, `README.md` as needed
+- update `AGENTS.md`, `CLAUDE.md` 
 - append detailed entry to `CHANGELOG.md`
+- update `README.md` if needed

@@ -1,0 +1,12 @@
+data: {"type":"search_start","query":"qwen"}
+
+data: {"type":"search_done","results":[{"title":"R1","url":"https://a.com","snippet":"s"}]}
+
+data: {"type":"context_usage","usage":{"phase":"single","used_estimated_tokens":10,"window_total_tokens":100,"usage_ratio":0.1,"model":"moonshotai/kimi-k2.5"}}
+
+data: {"type":"reasoning","content":"step"}
+
+data: {"type":"token","content":"answer"}
+
+data: {"type":"done"}
+

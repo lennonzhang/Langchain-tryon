@@ -1,11 +1,23 @@
-"""Tool-calling agent orchestration using LangChain."""
+"""Agent orchestration — delegates to the LangGraph agent graph.
+
+The public ``run_agent`` function builds the graph, assembles the initial
+state, and invokes it.  All intermediate and final-answer events are
+emitted through the *event_emitter* callback; this function returns
+**nothing** (the old ``str`` return has been replaced by ``token`` events).
+"""
 
 from __future__ import annotations
 
-from .message_builder import history_as_messages
-from .model_profile import stream_or_invoke_kwargs
+import logging
 
-_AGENT_MAX_STEPS = 3
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from .agent_graph import AgentState, build_agent_graph
+from .message_builder import history_as_messages
+from .model_registry import get_agent_config
+from .tools_registry import build_agent_tools
+
+logger = logging.getLogger(__name__)
 
 
 def run_agent(
@@ -18,68 +30,68 @@ def run_agent(
     event_collector: list[dict] | None = None,
     event_emitter=None,
     emit_reasoning: bool = False,
-) -> str:
-    from langchain.agents import AgentExecutor, create_tool_calling_agent
-    from langchain_core.callbacks import BaseCallbackHandler
-    from langchain_core.prompts import ChatPromptTemplate
-    from .tools_registry import build_agent_tools
+) -> None:
+    """Run the LangGraph agent loop.
 
-    def _emit_event(event: dict):
+    All events — including ``token`` chunks for the final answer — are
+    pushed through *event_emitter*.  The caller should **not** expect a
+    return value.
+    """
+    def _emit(event: dict):
         if isinstance(event_collector, list):
             event_collector.append(event)
         if callable(event_emitter):
             event_emitter(event)
 
-    class _AgentEventHandler(BaseCallbackHandler):
-        def __init__(self, enabled: bool):
-            self.enabled = enabled
+    # Resolve per-model agent configuration
+    agent_cfg = get_agent_config(model)
+    enabled_tools = set(agent_cfg.get("tools", []))
 
-        def on_llm_end(self, response, **kwargs):
-            if not self.enabled:
-                return
-            generations = getattr(response, "generations", None)
-            if not isinstance(generations, list):
-                return
-            for generation_group in generations:
-                if not isinstance(generation_group, list):
-                    continue
-                for generation in generation_group:
-                    message_obj = getattr(generation, "message", None)
-                    additional = getattr(message_obj, "additional_kwargs", {}) or {}
-                    reasoning = additional.get("reasoning_content")
-                    if isinstance(reasoning, str) and reasoning:
-                        _emit_event({"type": "reasoning", "content": reasoning})
+    tools = build_agent_tools(
+        search_provider=search_provider,
+        event_emitter=_emit,
+        enabled_tools=enabled_tools or None,
+    )
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system",
-         "You are a helpful assistant that can use tools to find information. "
-         "Answer in the same language as the user's question."),
-        ("placeholder", "{chat_history}"),
-        ("human", "{input}"),
-        ("placeholder", "{agent_scratchpad}"),
-    ])
-
-    # Tool-calling agents use structured API calls instead of text parsing,
-    # so thinking mode can remain enabled without breaking the agent loop.
-    llm = client.bind(**stream_or_invoke_kwargs(model, thinking_mode))
-    tools = build_agent_tools(search_provider=search_provider)
-    agent = create_tool_calling_agent(llm, tools, prompt)
-    executor = AgentExecutor(
-        agent=agent,
+    graph = build_agent_graph(
+        client=client,
+        model=model,
         tools=tools,
-        max_iterations=_AGENT_MAX_STEPS,
-        handle_parsing_errors=True,
-        return_intermediate_steps=False,
-        verbose=False,
+        thinking_mode=thinking_mode,
+        emit_reasoning=emit_reasoning,
+        event_emitter=_emit,
     )
 
-    callbacks = [_AgentEventHandler(bool(emit_reasoning))]
-    result = executor.invoke(
-        {
-            "input": message,
-            "chat_history": history_as_messages(history),
-        },
-        config={"callbacks": callbacks},
-    )
-    output = result.get("output", "")
-    return output.strip() if isinstance(output, str) else str(output)
+    # Assemble initial messages
+    from .agent_graph import _SYSTEM_PROMPT  # noqa: WPS436
+
+    history_messages = history_as_messages(history)
+    history_systems = [
+        msg.content
+        for msg in history_messages
+        if isinstance(msg, SystemMessage) and isinstance(msg.content, str) and msg.content.strip()
+    ]
+    non_system_history = [
+        msg for msg in history_messages
+        if not isinstance(msg, SystemMessage)
+    ]
+
+    merged_system_prompt = _SYSTEM_PROMPT
+    if history_systems:
+        merged_system_prompt += "\n\n" + "\n\n".join(history_systems)
+
+    initial_messages = [SystemMessage(content=merged_system_prompt)]
+    initial_messages.extend(non_system_history)
+    initial_messages.append(HumanMessage(content=message))
+
+    initial_state: AgentState = {
+        "messages": initial_messages,
+        "step_count": 0,
+        "max_steps": agent_cfg.get("max_steps", 6),
+        "last_had_tool_calls": False,
+        "step_end_emitted": False,
+        "enable_planning": agent_cfg.get("enable_planning", False),
+        "enable_reflection": agent_cfg.get("enable_reflection", False),
+    }
+
+    graph.invoke(initial_state)

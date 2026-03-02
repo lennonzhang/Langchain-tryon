@@ -33,7 +33,7 @@ def stream_agentic(
 
     agent_events: list[dict] = []
     result_queue: queue.Queue = queue.Queue()
-    state = {"final_answer": "", "error": None}
+    state: dict = {"error": None}
 
     def _emit_from_agent(event: dict):
         result_queue.put(event)
@@ -43,7 +43,7 @@ def stream_agentic(
     def _run_agent():
         try:
             with proxy_env_guard():
-                state["final_answer"] = run_agent(
+                run_agent(
                     client=client,
                     model=model,
                     message=message,
@@ -82,10 +82,7 @@ def stream_agentic(
         yield {"type": "done", "finish_reason": "error"}
         return
 
-    answer = state["final_answer"]
-    if not answer or not answer.strip():
-        answer = "(The agent did not produce a final answer. Please try again.)"
-    yield {"type": "token", "content": answer}
+    # Token events have already been streamed by the agent graph.
     yield {"type": "done", "finish_reason": "stop"}
 
 

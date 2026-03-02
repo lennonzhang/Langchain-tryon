@@ -46,6 +46,12 @@ _REGISTRY: list[dict] = [
             "thinking_kwarg_field": "enable_thinking",
         },
         "context_window": 128000,
+        "agent_config": {
+            "max_steps": 8,
+            "tools": ["web_search", "read_url", "python_exec"],
+            "enable_planning": True,
+            "enable_reflection": True,
+        },
     },
     {
         "id": "z-ai/glm5",
@@ -65,6 +71,12 @@ _REGISTRY: list[dict] = [
             "thinking_kwarg_field": "chat_template_kwargs",
         },
         "context_window": 128000,
+        "agent_config": {
+            "max_steps": 8,
+            "tools": ["web_search", "read_url", "python_exec"],
+            "enable_planning": True,
+            "enable_reflection": True,
+        },
     },
 ]
 
@@ -114,6 +126,26 @@ def get_params(model_id: str) -> dict:
     """Return the model-specific parameter dict, or empty dict if unknown."""
     m = get_by_id(model_id)
     return dict(m["params"]) if m else {}
+
+
+_DEFAULT_AGENT_CONFIG: dict = {
+    "max_steps": 6,
+    "tools": ["web_search", "read_url"],
+    "enable_planning": False,
+    "enable_reflection": False,
+}
+
+
+def get_agent_config(model_id: str) -> dict:
+    """Return the agent configuration for *model_id*.
+
+    Falls back to ``_DEFAULT_AGENT_CONFIG`` when the model has no
+    ``agent_config`` entry or is unknown.
+    """
+    m = get_by_id(model_id)
+    if m is None:
+        return dict(_DEFAULT_AGENT_CONFIG)
+    return dict(m.get("agent_config", _DEFAULT_AGENT_CONFIG))
 
 
 def capabilities_response() -> dict:

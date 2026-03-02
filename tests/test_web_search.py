@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+import time
 from unittest.mock import patch
 
 import requests
@@ -128,6 +129,109 @@ class TestWebSearch(unittest.TestCase):
             results = web_search("hello", num_results=3)
 
         self.assertEqual(results, [])
+
+    def test_web_search_respects_max_pages(self):
+        class FakeDDGS:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def text(self, query, max_results=5):
+                return [
+                    {"title": "T1", "href": "https://a1", "body": "S1"},
+                    {"title": "T2", "href": "https://a2", "body": "S2"},
+                    {"title": "T3", "href": "https://a3", "body": "S3"},
+                ]
+
+        fake_module = types.ModuleType("duckduckgo_search")
+        fake_module.DDGS = FakeDDGS
+
+        with (
+            patch.dict(sys.modules, {"duckduckgo_search": fake_module}),
+            patch("backend.web_search.load_webpage_content", return_value="page text") as load_mock,
+        ):
+            results = web_search("hello", num_results=3, max_pages=2, concurrency=2)
+
+        self.assertEqual(load_mock.call_count, 2)
+        self.assertIn("content", results[0])
+        self.assertIn("content", results[1])
+        self.assertNotIn("content", results[2])
+
+    def test_web_search_budget_timeout_returns_partial_results(self):
+        class FakeDDGS:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def text(self, query, max_results=5):
+                return [
+                    {"title": "Slow", "href": "https://slow", "body": "S0"},
+                    {"title": "Fast1", "href": "https://fast1", "body": "S1"},
+                    {"title": "Fast2", "href": "https://fast2", "body": "S2"},
+                ]
+
+        def _fake_loader(url, max_chars=1800, timeout_s=2.0):
+            if "slow" in url:
+                time.sleep(0.5)
+                return "slow content"
+            return f"content-{url[-1]}"
+
+        fake_module = types.ModuleType("duckduckgo_search")
+        fake_module.DDGS = FakeDDGS
+
+        with (
+            patch.dict(sys.modules, {"duckduckgo_search": fake_module}),
+            patch("backend.web_search.load_webpage_content", side_effect=_fake_loader),
+        ):
+            started = time.monotonic()
+            results = web_search(
+                "hello",
+                num_results=3,
+                total_budget_s=0.05,
+                concurrency=3,
+                max_pages=3,
+            )
+            elapsed = time.monotonic() - started
+
+        self.assertLess(elapsed, 0.3)
+        self.assertIn("content", results[1])
+        self.assertIn("content", results[2])
+        self.assertNotIn("content", results[0])
+
+    def test_web_search_single_page_failure_isolated(self):
+        class FakeDDGS:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def text(self, query, max_results=5):
+                return [
+                    {"title": "OK", "href": "https://ok", "body": "S1"},
+                    {"title": "Bad", "href": "https://bad", "body": "S2"},
+                ]
+
+        def _fake_loader(url, max_chars=1800, timeout_s=2.0):
+            if "bad" in url:
+                raise RuntimeError("boom")
+            return "ok content"
+
+        fake_module = types.ModuleType("duckduckgo_search")
+        fake_module.DDGS = FakeDDGS
+
+        with (
+            patch.dict(sys.modules, {"duckduckgo_search": fake_module}),
+            patch("backend.web_search.load_webpage_content", side_effect=_fake_loader),
+        ):
+            results = web_search("hello", num_results=2, total_budget_s=1.0, concurrency=2)
+
+        self.assertIn("content", results[0])
+        self.assertNotIn("content", results[1])
 
     def test_format_search_context(self):
         context = format_search_context(

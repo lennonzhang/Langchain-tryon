@@ -1,0 +1,4 @@
+data: {"type":"error","error":"boom"}
+
+data: {"type":"done","finish_reason":"error"}
+

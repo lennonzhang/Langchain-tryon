@@ -1,4 +1,5 @@
 import os
+import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +15,7 @@ FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 
 class ChatHandler(BaseHTTPRequestHandler):
     api_key = load_api_key(BASE_DIR)
+    debug_stream = False
 
     def do_GET(self) -> None:
         req_path = urlparse(self.path).path
@@ -38,19 +40,23 @@ class ChatHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if self.path == "/api/chat":
-            handle_chat_once(self, self.api_key)
+            handle_chat_once(self, self.api_key, debug_stream=bool(self.debug_stream))
             return
         if self.path == "/api/chat/stream":
-            handle_chat_stream(self, self.api_key)
+            handle_chat_stream(self, self.api_key, debug_stream=bool(self.debug_stream))
             return
         send_json(self, 404, {"error": "Not found"})
 
 
-def run() -> None:
+def run(debug_stream: bool = False) -> None:
     host = "127.0.0.1"
     port = int(os.getenv("PORT", "8000"))
+    if debug_stream:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    ChatHandler.debug_stream = bool(debug_stream)
     server = ThreadingHTTPServer((host, port), ChatHandler)
-    print(f"Serving on http://{host}:{port}")
+    mode = "on" if debug_stream else "off"
+    print(f"Serving on http://{host}:{port} (debug-stream: {mode})")
     server.serve_forever()
 
 

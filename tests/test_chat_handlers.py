@@ -266,6 +266,68 @@ class TestChatHandlers(unittest.TestCase):
         self.assertEqual(send_sse_mock.call_args_list[0][0][1]["type"], "error")
         self.assertEqual(send_sse_mock.call_args_list[1][0][1], {"type": "done", "finish_reason": "error"})
 
+    def test_handle_chat_stream_debug_disabled_does_not_log(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": [], "request_id": "rid-100"},
+            ),
+            patch("backend.chat_handlers.init_sse"),
+            patch("backend.chat_handlers.stream_chat", return_value=iter([{"type": "done"}])),
+            patch("backend.chat_handlers.send_sse_event"),
+            patch("backend.chat_handlers.resolve_model", return_value="qwen/qwen3.5-397b-a17b"),
+            patch("backend.chat_handlers.logger.info") as log_mock,
+        ):
+            handle_chat_stream(handler, "api-key", debug_stream=False)
+
+        log_mock.assert_not_called()
+
+    def test_handle_chat_stream_debug_enabled_logs_events(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": [], "request_id": "rid-101"},
+            ),
+            patch("backend.chat_handlers.init_sse"),
+            patch(
+                "backend.chat_handlers.stream_chat",
+                return_value=iter([{"type": "token", "content": "hi there"}, {"type": "done"}]),
+            ),
+            patch("backend.chat_handlers.send_sse_event"),
+            patch("backend.chat_handlers.resolve_model", return_value="qwen/qwen3.5-397b-a17b"),
+            patch("backend.chat_handlers.logger.info") as log_mock,
+        ):
+            handle_chat_stream(handler, "api-key", debug_stream=True)
+
+        logged = " || ".join(" ".join(str(x) for x in c.args) for c in log_mock.call_args_list)
+        self.assertIn("rid=rid-101", logged)
+        self.assertIn("model=qwen/qwen3.5-397b-a17b", logged)
+        self.assertIn("evt=stream_start", logged)
+        self.assertIn("evt=token", logged)
+        self.assertIn("evt=done", logged)
+
+    def test_handle_chat_once_debug_enabled_logs_start_and_done(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": [], "request_id": "rid-102"},
+            ),
+            patch("backend.chat_handlers.chat_once", return_value="final answer"),
+            patch("backend.chat_handlers.send_json"),
+            patch("backend.chat_handlers.resolve_model", return_value="moonshotai/kimi-k2.5"),
+            patch("backend.chat_handlers.logger.info") as log_mock,
+        ):
+            handle_chat_once(handler, "api-key", debug_stream=True)
+
+        logged = " || ".join(" ".join(str(x) for x in c.args) for c in log_mock.call_args_list)
+        self.assertIn("rid=rid-102", logged)
+        self.assertIn("model=moonshotai/kimi-k2.5", logged)
+        self.assertIn("evt=chat_once_start", logged)
+        self.assertIn("evt=chat_once_done", logged)
+
 
 if __name__ == "__main__":
     unittest.main()

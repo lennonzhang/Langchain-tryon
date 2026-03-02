@@ -55,9 +55,10 @@ def build_messages(
     images: list[str] | None = None,
 ) -> list[dict]:
     messages: list[dict] = []
+    system_parts: list[str] = []
 
-    if search_context:
-        messages.append({"role": "system", "content": search_context})
+    if isinstance(search_context, str) and search_context.strip():
+        system_parts.append(search_context)
 
     if isinstance(history, list):
         for item in history[-20:]:
@@ -65,8 +66,14 @@ def build_messages(
                 continue
             role = item.get("role")
             content = item.get("content")
-            if role in {"user", "assistant", "system"} and isinstance(content, str):
+            if role == "system" and isinstance(content, str) and content.strip():
+                system_parts.append(content)
+                continue
+            if role in {"user", "assistant"} and isinstance(content, str):
                 messages.append({"role": role, "content": content})
+
+    if system_parts:
+        messages.insert(0, {"role": "system", "content": "\n\n".join(system_parts)})
 
     user_content = build_user_content(model, message, images or [])
     messages.append({"role": "user", "content": user_content})

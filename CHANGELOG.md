@@ -2,6 +2,126 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-02 (Web Loader Parallelization and Timeout Controls)
+
+### Summary
+
+Improved web page loading performance for search context injection by introducing parallel fetching with bounded per-page timeout and total budget limits. This keeps default `include_page_content=True` behavior while reducing long-tail request latency.
+
+### Backend
+
+- Updated `backend/web_search.py`:
+  - added parallel page-content loading via `ThreadPoolExecutor`
+  - added total budget cutoff via `as_completed(..., timeout=...)`
+  - preserved per-URL fallback chain: `WebBaseLoader` -> `requests + bs4`
+  - added optional parameters on `web_search(...)`:
+    - `page_timeout_s`
+    - `total_budget_s`
+    - `max_pages`
+    - `concurrency`
+  - added optional `timeout_s` to `load_webpage_content(...)`
+- Updated `backend/nvidia_client.py` `_run_web_search(...)` to accept and forward the new runtime controls.
+
+### Configuration
+
+- Added environment options:
+  - `WEB_LOADER_TIMEOUT_SECONDS` (default `2.0`)
+  - `WEB_SEARCH_TOTAL_BUDGET_SECONDS` (default `4.0`)
+  - `WEB_LOADER_MAX_PAGES` (default `3`)
+  - `WEB_LOADER_CONCURRENCY` (default `3`)
+- Documented these variables in `.env.example` and `README.md`.
+
+## 2026-02-28 (Frontend V2 Session Refactor + Robust Tests)
+
+### Summary
+
+Frontend chat was refactored into a session-centric architecture with clear data/state boundaries, pluggable persistence abstraction, and stronger stream isolation. Test coverage was expanded across unit/component/integration layers with new SSE fixture regressions.
+
+### Frontend Architecture
+
+- Added provider and domain layers:
+  - `frontend-react/src/app/AppProviders.jsx`
+  - `frontend-react/src/entities/session/*`
+  - `frontend-react/src/features/sessions/*`
+  - `frontend-react/src/features/chat/*`
+  - `frontend-react/src/shared/store/*`
+  - `frontend-react/src/shared/api/*`
+  - `frontend-react/src/shared/lib/*`
+- Introduced session repository abstraction with first implementation:
+  - `MemorySessionRepository` (pluggable for future IndexedDB/backend sync)
+- Added session sidebar/list UI with title/time/preview rendering and per-session switching.
+- Added stream pipeline split:
+  - `useSendMessage`
+  - `useStreamController`
+  - `mapStreamEventToPatch`
+- Added request isolation invariant in frontend runtime:
+  - stream updates are validated by `sessionId + requestId`.
+
+### SSE + Stream Handling
+
+- Moved parser implementation to `frontend-react/src/shared/lib/sse/parseEventStream.js`.
+- Kept compatibility export via `frontend-react/src/stream.js`.
+- Hardened parser line-ending handling (`LF` and `CRLF`) to avoid fixture/runtime mismatch.
+
+### Tests
+
+- Added unit tests:
+  - `src/__tests__/mapStreamEventToPatch.test.js`
+  - `src/__tests__/memorySessionRepository.test.js`
+  - `src/__tests__/chatUiStore.test.js`
+  - `src/__tests__/sessionSummary.test.js`
+- Added component/integration tests:
+  - `src/__tests__/SessionList.test.jsx`
+  - updated `src/__tests__/App.behavior.test.jsx` with session creation, error invariant, and cross-session stream isolation.
+- Added fixture-driven SSE parser regression tests:
+  - `src/__tests__/stream.fixtures.test.js`
+- Added SSE fixture files:
+  - `stream-error-then-done.txt`
+  - `stream-search-usage-reasoning.txt`
+  - `stream-malformed-lines.txt`
+  - `stream-cross-session-interleaving.txt`
+
+### Verification
+
+- `cd frontend-react && pnpm test` passed (`24` tests).
+- `cd frontend-react && pnpm run build` passed.
+
+## 2026-02-28 (Agentic Refactoring)
+
+### Summary
+
+Backend agent system rewritten from LangChain `AgentExecutor` (3-step, 1 tool) to LangGraph `StateGraph` with Plan → Act → Observe → Reflect loop, multiple tools, configurable iteration limits, and token-by-token streaming of final answers.
+
+### Agent Architecture
+
+- Replaced `AgentExecutor` with LangGraph `StateGraph` in new `backend/agent_graph.py`:
+  - **plan_node**: optional planning phase before tool use
+  - **agent_node**: LLM decision (call tool or answer)
+  - **execute_tools_node**: runs tools with `tool_call`/`tool_result` event emission
+  - **reflect_node**: periodic self-evaluation (every 3 steps, configurable)
+  - **stream_answer_node**: token-by-token streaming of final answer via `client.stream()`
+- Configurable max steps per model (default 8, was hardcoded 3)
+- Agent emits all events (including tokens) via `event_emitter`; no longer returns a string
+
+### New Tools
+
+- `read_url`: fetches and reads web page content (reuses `web_search.load_webpage_content`)
+- `python_exec`: sandboxed Python code execution via subprocess (opt-in via `ENABLE_CODE_INTERPRETER=1`)
+- Tool selection per-model via `agent_config.tools` in model registry
+- `build_agent_tools()` now accepts `enabled_tools` filter parameter
+
+### New SSE Events (backward-compatible)
+
+- `agent_plan`, `agent_step_start`, `agent_step_end`, `tool_call`, `tool_result`, `agent_reflect`
+
+### Files Changed
+
+- **New**: `backend/agent_graph.py`, `tests/test_agent_graph.py`
+- **Rewritten**: `backend/agent_orchestrator.py`, `backend/tools_registry.py`
+- **Modified**: `backend/event_mapper.py`, `backend/nvidia_client.py`, `backend/model_registry.py`, `requirements.txt`
+
+---
+
 ## 2026-02-28
 
 ### Summary

@@ -1,12 +1,42 @@
 """Web search via DuckDuckGo for context injection."""
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 import logging
+import os
 import re
+import time
 import warnings
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_WEB_LOADER_TIMEOUT_SECONDS = 2.0
+_DEFAULT_WEB_SEARCH_TOTAL_BUDGET_SECONDS = 4.0
+_DEFAULT_WEB_LOADER_MAX_PAGES = 3
+_DEFAULT_WEB_LOADER_CONCURRENCY = 3
+
+
+def _float_env(name: str, default: float, min_value: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value >= min_value else min_value
+
+
+def _int_env(name: str, default: int, min_value: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= min_value else min_value
 
 
 def _normalize_text(value: str, max_chars: int) -> str:
@@ -27,7 +57,7 @@ def _extract_with_bs4(html: str, max_chars: int) -> str:
     return _normalize_text(text, max_chars=max_chars)
 
 
-def _fetch_with_requests(url: str, max_chars: int, timeout: int = 8) -> str:
+def _fetch_with_requests(url: str, max_chars: int, timeout: float = 8.0) -> str:
     headers = {"User-Agent": "langchain-tryon/1.0"}
     try:
         resp = requests.get(url, headers=headers, timeout=timeout)
@@ -48,7 +78,7 @@ def _fetch_with_requests(url: str, max_chars: int, timeout: int = 8) -> str:
         return ""
 
 
-def load_webpage_content(url: str, max_chars: int = 1800) -> str:
+def load_webpage_content(url: str, max_chars: int = 1800, timeout_s: float = 8.0) -> str:
     """Load and trim webpage text content using LangChain WebBaseLoader."""
     try:
         from langchain_community.document_loaders import WebBaseLoader
@@ -58,13 +88,13 @@ def load_webpage_content(url: str, max_chars: int = 1800) -> str:
 
     try:
         try:
-            loader = WebBaseLoader(url, requests_kwargs={"timeout": 8})
+            loader = WebBaseLoader(url, requests_kwargs={"timeout": timeout_s})
         except TypeError:
-            loader = WebBaseLoader(web_paths=(url,), requests_kwargs={"timeout": 8})
+            loader = WebBaseLoader(web_paths=(url,), requests_kwargs={"timeout": timeout_s})
         docs = loader.load()
     except Exception as exc:  # noqa: BLE001
         logger.warning("WebBaseLoader failed for %s: %s", url, exc)
-        return _fetch_with_requests(url, max_chars=max_chars)
+        return _fetch_with_requests(url, max_chars=max_chars, timeout=timeout_s)
 
     parts = []
     for doc in docs or []:
@@ -75,10 +105,18 @@ def load_webpage_content(url: str, max_chars: int = 1800) -> str:
     merged = _normalize_text("\n".join(parts), max_chars=max_chars)
     if merged:
         return merged
-    return _fetch_with_requests(url, max_chars=max_chars)
+    return _fetch_with_requests(url, max_chars=max_chars, timeout=timeout_s)
 
 
-def web_search(query: str, num_results: int = 5, include_page_content: bool = True) -> list[dict]:
+def web_search(
+    query: str,
+    num_results: int = 5,
+    include_page_content: bool = True,
+    page_timeout_s: float | None = None,
+    total_budget_s: float | None = None,
+    max_pages: int | None = None,
+    concurrency: int | None = None,
+) -> list[dict]:
     """Return a list of ``{title, url, snippet}`` dicts, or ``[]`` on failure."""
     try:
         from duckduckgo_search import DDGS
@@ -98,13 +136,74 @@ def web_search(query: str, num_results: int = 5, include_page_content: bool = Tr
             for h in hits
         ]
         if include_page_content:
-            for item in results:
+            effective_timeout = (
+                page_timeout_s
+                if page_timeout_s is not None
+                else _float_env(
+                    "WEB_LOADER_TIMEOUT_SECONDS",
+                    _DEFAULT_WEB_LOADER_TIMEOUT_SECONDS,
+                    0.1,
+                )
+            )
+            effective_budget = (
+                total_budget_s
+                if total_budget_s is not None
+                else _float_env(
+                    "WEB_SEARCH_TOTAL_BUDGET_SECONDS",
+                    _DEFAULT_WEB_SEARCH_TOTAL_BUDGET_SECONDS,
+                    0.1,
+                )
+            )
+            effective_max_pages = (
+                max_pages
+                if max_pages is not None
+                else _int_env("WEB_LOADER_MAX_PAGES", _DEFAULT_WEB_LOADER_MAX_PAGES, 0)
+            )
+            effective_concurrency = (
+                concurrency
+                if concurrency is not None
+                else _int_env("WEB_LOADER_CONCURRENCY", _DEFAULT_WEB_LOADER_CONCURRENCY, 1)
+            )
+
+            candidates: list[tuple[int, str]] = []
+            for idx, item in enumerate(results[:effective_max_pages]):
                 url = item.get("url", "")
-                if not url:
-                    continue
-                content = load_webpage_content(url, max_chars=1800)
-                if content:
-                    item["content"] = content
+                if url:
+                    candidates.append((idx, url))
+
+            if candidates:
+                workers = min(effective_concurrency, len(candidates))
+                executor = ThreadPoolExecutor(max_workers=workers)
+                started_at = time.monotonic()
+                future_to_index = {
+                    executor.submit(
+                        load_webpage_content,
+                        url,
+                        max_chars=1800,
+                        timeout_s=effective_timeout,
+                    ): idx
+                    for idx, url in candidates
+                }
+                try:
+                    for future in as_completed(future_to_index, timeout=effective_budget):
+                        idx = future_to_index[future]
+                        try:
+                            content = future.result()
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("Parallel page loading failed: %s", exc)
+                            continue
+                        if content:
+                            results[idx]["content"] = content
+                except FuturesTimeoutError:
+                    elapsed = max(0.0, time.monotonic() - started_at)
+                    logger.info(
+                        "Web page loading budget exceeded for query '%s' (%.2fs/%.2fs).",
+                        query,
+                        elapsed,
+                        effective_budget,
+                    )
+                finally:
+                    executor.shutdown(wait=False, cancel_futures=True)
         return results
     except Exception as exc:
         logger.error("DuckDuckGo search error: %s", exc)

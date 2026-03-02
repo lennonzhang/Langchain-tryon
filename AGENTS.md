@@ -26,7 +26,8 @@ Repository-level guide for coding agents.
 
 ## SSE Contract
 
-- Event types: `search_start`, `search_done`, `search_error`, `context_usage`, `reasoning`, `token`, `error`, `done`
+- Core events: `search_start`, `search_done`, `search_error`, `context_usage`, `reasoning`, `token`, `error`, `done`
+- Agent events: `agent_plan`, `agent_step_start`, `agent_step_end`, `tool_call`, `tool_result`, `agent_reflect`
 - Every event includes `v: 1`
 - Include `request_id` when available
 - Error invariant: `error` must be followed by `done` with `finish_reason: "error"`
@@ -47,12 +48,14 @@ Repository-level guide for coding agents.
 ## Architecture Rules
 
 - Keep `backend/nvidia_client.py` as facade.
-- Put detailed logic in extracted modules (`model_profile`, `message_builder`, `agent_orchestrator`, `event_mapper`, `search_provider`, `schemas`).
+- Put detailed logic in extracted modules (`model_profile`, `message_builder`, `agent_graph`, `agent_orchestrator`, `event_mapper`, `search_provider`, `schemas`, `tools_registry`).
 - Use `SearchProvider` for both agent and non-agent search event emission.
 - Do not rename SSE events silently.
 - Update tests + docs together.
 - Frontend chat auto-scroll policy: follow only when user is near bottom (threshold `150px`); do not force scroll after user scrolls up.
 - For Playwright SSE fixtures, normalize line endings to LF before parsing.
+- Frontend session/stream updates must be isolated by `sessionId + requestId`; do not allow cross-session stream writes.
+- Frontend persistence remains repository-driven; avoid coupling UI directly to storage implementation.
 
 ## Validation
 
@@ -69,6 +72,7 @@ pnpm run build
 - Model registry: `backend/model_registry.py`
 - Model profile/runtime params: `backend/model_profile.py`
 - Message assembly/token estimate: `backend/message_builder.py`
+- Agent graph (LangGraph): `backend/agent_graph.py`
 - Agent orchestration: `backend/agent_orchestrator.py`
 - Stream event mapping: `backend/event_mapper.py`
 - Search abstraction: `backend/search_provider.py`
@@ -79,6 +83,11 @@ pnpm run build
 - Public facade API: `backend/nvidia_client.py`
 - Server entry: `backend/server.py`
 - Frontend root: `frontend-react/src/App.jsx`
+- Frontend providers: `frontend-react/src/app/AppProviders.jsx`
+- Frontend session feature: `frontend-react/src/features/sessions/*`
+- Frontend chat feature: `frontend-react/src/features/chat/*`
+- Frontend entities: `frontend-react/src/entities/*`
+- Frontend shared store/api/lib: `frontend-react/src/shared/*`
 - Frontend hooks: `frontend-react/src/hooks/*`
 - Frontend components: `frontend-react/src/components/*`
 - Frontend utils: `frontend-react/src/utils/*`

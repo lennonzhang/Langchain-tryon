@@ -1,7 +1,7 @@
 import CollapsibleSection from "./CollapsibleSection";
 import RichBlock from "./RichBlock";
 
-export default function StreamMessage({ msg, isPending }) {
+export default function StreamMessage({ msg, showTyping }) {
   return (
     <div className="msg assistant stream">
       {msg.search.state !== "hidden" && (
@@ -60,7 +60,7 @@ export default function StreamMessage({ msg, isPending }) {
       <div className="assistant-section answer">
         <div className="assistant-title">Answer</div>
         <RichBlock className="assistant-body" text={msg.answer} />
-        {isPending && (
+        {showTyping && (
           <span className="typing-dots" aria-label="Typing">
             <span className="dot" />
             <span className="dot" />

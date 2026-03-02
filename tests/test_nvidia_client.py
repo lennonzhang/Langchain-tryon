@@ -1,4 +1,5 @@
 import unittest
+import os
 from types import SimpleNamespace
 from unittest.mock import patch
 import types
@@ -9,6 +10,7 @@ from backend.nvidia_client import (
     _build_chat_model,
     _build_messages,
     _normalize_media_data_urls,
+    _run_web_search,
     _should_use_agentic_flow,
     chat_once,
     stream_chat,
@@ -37,6 +39,60 @@ class FakeClient:
 
 
 class TestNvidiaClient(unittest.TestCase):
+    def test_run_web_search_forwards_explicit_controls(self):
+        with (
+            patch("backend.web_search.web_search", return_value=[{"title": "T"}]) as web_search_mock,
+            patch("backend.web_search.format_search_context", return_value="ctx"),
+        ):
+            context, results = _run_web_search(
+                "question",
+                num_results=7,
+                include_page_content=True,
+                page_timeout_s=1.5,
+                total_budget_s=3.5,
+                max_pages=2,
+                concurrency=4,
+            )
+
+        self.assertEqual(context, "ctx")
+        self.assertEqual(results, [{"title": "T"}])
+        web_search_mock.assert_called_once_with(
+            "question",
+            num_results=7,
+            include_page_content=True,
+            page_timeout_s=1.5,
+            total_budget_s=3.5,
+            max_pages=2,
+            concurrency=4,
+        )
+
+    def test_run_web_search_reads_controls_from_env(self):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "WEB_LOADER_TIMEOUT_SECONDS": "2.5",
+                    "WEB_SEARCH_TOTAL_BUDGET_SECONDS": "5.5",
+                    "WEB_LOADER_MAX_PAGES": "4",
+                    "WEB_LOADER_CONCURRENCY": "6",
+                },
+                clear=False,
+            ),
+            patch("backend.web_search.web_search", return_value=[]) as web_search_mock,
+            patch("backend.web_search.format_search_context", return_value=""),
+        ):
+            _run_web_search("question")
+
+        web_search_mock.assert_called_once_with(
+            "question",
+            num_results=5,
+            include_page_content=True,
+            page_timeout_s=2.5,
+            total_budget_s=5.5,
+            max_pages=4,
+            concurrency=6,
+        )
+
     def test_build_chat_model_zai_thinking_on(self):
         fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
         chat_cls = unittest.mock.Mock()
@@ -79,6 +135,23 @@ class TestNvidiaClient(unittest.TestCase):
         )
         self.assertEqual(messages[0], {"role": "system", "content": "search ctx"})
         self.assertEqual(messages[-1]["role"], "user")
+
+    def test_build_messages_merges_history_system_into_first_system(self):
+        messages = _build_messages(
+            "qwen/qwen3.5-397b-a17b",
+            "latest question",
+            [
+                {"role": "user", "content": "u1"},
+                {"role": "system", "content": "policy from history"},
+                {"role": "assistant", "content": "a1"},
+            ],
+            search_context="search ctx",
+        )
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn("search ctx", messages[0]["content"])
+        self.assertIn("policy from history", messages[0]["content"])
+        trailing_system = any(m.get("role") == "system" for m in messages[1:])
+        self.assertFalse(trailing_system)
 
     def test_build_messages_kimi_supports_images(self):
         messages = _build_messages(
@@ -361,6 +434,11 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertEqual(events[-1]["type"], "done")
 
     def test_chat_once_qwen_agentic_react_without_manual_search_toggle(self):
+        def _fake_agent(*args, **kwargs):
+            emitter = kwargs.get("event_emitter")
+            if callable(emitter):
+                emitter({"type": "token", "content": "Final summary"})
+
         fake_client = FakeClient()
         with (
             patch(
@@ -370,7 +448,7 @@ class TestNvidiaClient(unittest.TestCase):
             patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
             patch(
                 "backend.nvidia_client._run_langchain_agent",
-                return_value="Final summary",
+                side_effect=_fake_agent,
             ) as run_agent,
         ):
             answer = chat_once(
@@ -386,6 +464,11 @@ class TestNvidiaClient(unittest.TestCase):
         run_agent.assert_called_once()
 
     def test_chat_once_qwen_agentic_react_auto_enabled_by_default(self):
+        def _fake_agent(*args, **kwargs):
+            emitter = kwargs.get("event_emitter")
+            if callable(emitter):
+                emitter({"type": "token", "content": "Final summary"})
+
         fake_client = FakeClient()
         with (
             patch(
@@ -395,7 +478,7 @@ class TestNvidiaClient(unittest.TestCase):
             patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
             patch(
                 "backend.nvidia_client._run_langchain_agent",
-                return_value="Final summary",
+                side_effect=_fake_agent,
             ) as run_agent,
         ):
             answer = chat_once(
@@ -439,6 +522,11 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertTrue(_should_use_agentic_flow("z-ai/glm5", True))
 
     def test_stream_chat_qwen_agentic_react_auto_enabled_by_default(self):
+        def _fake_agent(*args, **kwargs):
+            emitter = kwargs.get("event_emitter")
+            if callable(emitter):
+                emitter({"type": "token", "content": "final"})
+
         with (
             patch(
                 "backend.nvidia_client.resolve_model",
@@ -447,7 +535,7 @@ class TestNvidiaClient(unittest.TestCase):
             patch("backend.nvidia_client._build_chat_model", return_value=FakeClient()),
             patch(
                 "backend.nvidia_client._run_langchain_agent",
-                return_value="final",
+                side_effect=_fake_agent,
             ) as run_agent,
         ):
             events = list(
@@ -470,7 +558,7 @@ class TestNvidiaClient(unittest.TestCase):
                 emitter({"type": "search_start", "query": "langchain react pattern"})
                 emitter({"type": "search_done", "results": [{"title": "r1"}]})
                 emitter({"type": "reasoning", "content": "agent thought"})
-            return "final agent answer"
+                emitter({"type": "token", "content": "final agent answer"})
 
         with (
             patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm5"),
@@ -506,7 +594,7 @@ class TestNvidiaClient(unittest.TestCase):
             if callable(emitter):
                 emitter({"type": "search_start", "query": "early-query"})
             time.sleep(0.3)
-            return "final"
+            emitter({"type": "token", "content": "final"})
 
         with (
             patch("backend.nvidia_client.resolve_model", return_value="z-ai/glm5"),

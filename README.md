@@ -31,6 +31,10 @@ NVIDIA_API_KEY=nvapi-your-key
 PORT=8000
 NVIDIA_USE_SYSTEM_PROXY=0
 USER_AGENT=langchain-tryon/1.0
+WEB_LOADER_TIMEOUT_SECONDS=2.0
+WEB_SEARCH_TOTAL_BUDGET_SECONDS=4.0
+WEB_LOADER_MAX_PAGES=3
+WEB_LOADER_CONCURRENCY=3
 ```
 
 ## 3. Run Locally
@@ -38,6 +42,14 @@ USER_AGENT=langchain-tryon/1.0
 ```powershell
 python server.py
 ```
+
+Enable stream debug logs:
+
+```powershell
+python server.py --debug-stream
+```
+
+When enabled, the backend prints event-level summaries (`request_id`, resolved model, event type, token/reasoning length, and truncated previews).
 
 Open `http://127.0.0.1:8000`.
 
@@ -123,6 +135,11 @@ Frontend:
 - `frontend-react/src/components/*`
 - `frontend-react/src/stream.js`
 - `frontend-react/src/utils/*`
+- `frontend-react/src/app/AppProviders.jsx` (query + repository provider)
+- `frontend-react/src/features/sessions/*` (session list, repository hooks)
+- `frontend-react/src/features/chat/*` (stream controller, send pipeline, event mapper)
+- `frontend-react/src/entities/session/*` (session domain helpers + memory repository)
+- `frontend-react/src/shared/store/chatUiStore.js` (global UI/runtime store)
 
 Deployment:
 
@@ -139,3 +156,10 @@ Deployment:
   - backend/frontend impact
   - API/SSE behavior changes
   - test updates and verification status
+
+## 9. Frontend V2 Notes
+
+- Session history is now a first-class frontend concept with title/time/preview list rendering.
+- Streaming updates are isolated by `sessionId + requestId` to prevent cross-session bleed.
+- SSE parser is CRLF/LF tolerant.
+- Current persistence default is in-memory repository (`MemorySessionRepository`), with pluggable repository interface for IndexedDB or backend sync later.

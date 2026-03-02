@@ -66,4 +66,35 @@ describe("parseEventStream", () => {
 
     expect(events).toEqual([{ type: "token", content: "AB" }, { type: "done" }]);
   });
+
+  it("awaits async onEvent handlers in strict order", async () => {
+    const events = [];
+    const order = [];
+    const reader = new FakeReader([
+      'data: {"type":"token","content":"A"}\n\n',
+      'data: {"type":"token","content":"B"}\n\n',
+      'data: {"type":"done"}\n\n',
+    ]);
+
+    await parseEventStream(reader, async (evt) => {
+      order.push(`start:${evt.type}:${evt.content || ""}`);
+      await new Promise((resolve) => setTimeout(resolve, evt.type === "token" ? 10 : 1));
+      events.push(evt);
+      order.push(`end:${evt.type}:${evt.content || ""}`);
+    });
+
+    expect(events).toEqual([
+      { type: "token", content: "A" },
+      { type: "token", content: "B" },
+      { type: "done" },
+    ]);
+    expect(order).toEqual([
+      "start:token:A",
+      "end:token:A",
+      "start:token:B",
+      "end:token:B",
+      "start:done:",
+      "end:done:",
+    ]);
+  });
 });

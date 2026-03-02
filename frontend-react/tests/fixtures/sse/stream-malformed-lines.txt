@@ -1,0 +1,7 @@
+event: custom
+data: not-json
+
+data: {"type":"token","content":"ok"}
+
+data: {"type":"done"}
+

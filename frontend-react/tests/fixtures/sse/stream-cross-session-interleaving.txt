@@ -1,0 +1,10 @@
+# session-A
+data: {"type":"token","content":"A1"}
+
+data: {"type":"done"}
+
+# session-B
+data: {"type":"token","content":"B1"}
+
+data: {"type":"done"}
+

@@ -10,6 +10,8 @@ All heavy logic has been extracted to:
 
 from __future__ import annotations
 
+import os
+
 from .config import resolve_model
 from .model_registry import supports
 from .search_provider import SearchProvider
@@ -58,11 +60,59 @@ def _run_web_search(
     message: str,
     num_results: int = 5,
     include_page_content: bool = True,
+    page_timeout_s: float | None = None,
+    total_budget_s: float | None = None,
+    max_pages: int | None = None,
+    concurrency: int | None = None,
 ):
     """Execute web search and return (context_str, results_list)."""
     from .web_search import format_search_context, web_search
 
-    results = web_search(message, num_results=num_results, include_page_content=include_page_content)
+    resolved_page_timeout = page_timeout_s
+    if resolved_page_timeout is None:
+        raw = os.getenv("WEB_LOADER_TIMEOUT_SECONDS", "").strip()
+        if raw:
+            try:
+                resolved_page_timeout = float(raw)
+            except ValueError:
+                resolved_page_timeout = None
+
+    resolved_total_budget = total_budget_s
+    if resolved_total_budget is None:
+        raw = os.getenv("WEB_SEARCH_TOTAL_BUDGET_SECONDS", "").strip()
+        if raw:
+            try:
+                resolved_total_budget = float(raw)
+            except ValueError:
+                resolved_total_budget = None
+
+    resolved_max_pages = max_pages
+    if resolved_max_pages is None:
+        raw = os.getenv("WEB_LOADER_MAX_PAGES", "").strip()
+        if raw:
+            try:
+                resolved_max_pages = int(raw)
+            except ValueError:
+                resolved_max_pages = None
+
+    resolved_concurrency = concurrency
+    if resolved_concurrency is None:
+        raw = os.getenv("WEB_LOADER_CONCURRENCY", "").strip()
+        if raw:
+            try:
+                resolved_concurrency = int(raw)
+            except ValueError:
+                resolved_concurrency = None
+
+    results = web_search(
+        message,
+        num_results=num_results,
+        include_page_content=include_page_content,
+        page_timeout_s=resolved_page_timeout,
+        total_budget_s=resolved_total_budget,
+        max_pages=resolved_max_pages,
+        concurrency=resolved_concurrency,
+    )
     context = format_search_context(message, results)
     return context, results
 
@@ -84,17 +134,23 @@ def chat_once(
 
     if _should_use_agentic_flow(chosen_model, agent_mode):
         noop_provider = SearchProvider(_run_web_search, lambda evt: None)
-        agent_events: list[dict] = []
+        collected_tokens: list[str] = []
+
+        def _collect_token(evt: dict):
+            if evt.get("type") == "token":
+                collected_tokens.append(evt.get("content", ""))
+
         with _proxy_env_guard():
-            return _run_langchain_agent(
+            _run_langchain_agent(
                 client=client,
                 model=chosen_model,
                 message=message,
                 history=history,
                 thinking_mode=thinking_mode,
                 search_provider=noop_provider,
-                event_collector=agent_events,
+                event_emitter=_collect_token,
             )
+        return "".join(collected_tokens) or "(No answer produced)"
 
     initial_search_context = ""
     if enable_search:
