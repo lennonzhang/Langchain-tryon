@@ -97,7 +97,10 @@ class TestNvidiaClient(unittest.TestCase):
         fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
         chat_cls = unittest.mock.Mock()
         fake_module.ChatNVIDIA = chat_cls
-        with patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}):
+        with (
+            patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}),
+            patch.dict(os.environ, {"NVIDIA_API_KEY": "nv-key"}, clear=False),
+        ):
             _build_chat_model("api-key", "z-ai/glm5", thinking_mode=True)
 
         kwargs = chat_cls.call_args.kwargs
@@ -108,7 +111,10 @@ class TestNvidiaClient(unittest.TestCase):
         fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
         chat_cls = unittest.mock.Mock()
         fake_module.ChatNVIDIA = chat_cls
-        with patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}):
+        with (
+            patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}),
+            patch.dict(os.environ, {"NVIDIA_API_KEY": "nv-key"}, clear=False),
+        ):
             _build_chat_model("api-key", "z-ai/glm5", thinking_mode=False)
 
         kwargs = chat_cls.call_args.kwargs
@@ -119,7 +125,10 @@ class TestNvidiaClient(unittest.TestCase):
         fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
         chat_cls = unittest.mock.Mock()
         fake_module.ChatNVIDIA = chat_cls
-        with patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}):
+        with (
+            patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}),
+            patch.dict(os.environ, {"NVIDIA_API_KEY": "nv-key"}, clear=False),
+        ):
             _build_chat_model("api-key", "qwen/qwen3.5-397b-a17b", thinking_mode=True)
 
         kwargs = chat_cls.call_args.kwargs
@@ -517,6 +526,9 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertTrue(_should_use_agentic_flow("qwen/qwen3.5-397b-a17b", None))
         self.assertTrue(_should_use_agentic_flow("z-ai/glm5", None))
         self.assertFalse(_should_use_agentic_flow("moonshotai/kimi-k2.5", None))
+        self.assertTrue(_should_use_agentic_flow("anthropic/claude-sonnet-4-6", None))
+        self.assertTrue(_should_use_agentic_flow("openai/gpt-5.3-codex", None))
+        self.assertTrue(_should_use_agentic_flow("google/gemini-3-flash-preview", None))
         self.assertFalse(_should_use_agentic_flow("z-ai/glm5", False))
         self.assertFalse(_should_use_agentic_flow("moonshotai/kimi-k2.5", True))
         self.assertTrue(_should_use_agentic_flow("z-ai/glm5", True))

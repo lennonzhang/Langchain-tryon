@@ -37,6 +37,17 @@ WEB_LOADER_MAX_PAGES=3
 WEB_LOADER_CONCURRENCY=3
 ```
 
+Non-NVIDIA provider env (optional - for Anthropic, OpenAI, Google via sssaicode proxy):
+
+```env
+ANTHROPIC_API_KEY=sk-...        # or CLAUDE_CLIENT_TOKEN_1 / CLAUDE_CLIENT_TOKEN
+OPENAI_API_KEY=sk-...           # or CODEX_TOKEN_1 / CODEX_TOKEN
+GOOGLE_API_KEY=...              # or GEMINI_API_KEY_1 / GEMINI_API_KEY
+ANTHROPIC_BASE_URL=https://claude2.sssaicode.com/api/v1
+OPENAI_BASE_URL=https://claude2.sssaicode.com/api/v1
+GOOGLE_BASE_URL=https://claude2.sssaicode.com/api/v1beta
+```
+
 ## 3. Run Locally
 
 ```powershell
@@ -58,13 +69,17 @@ Open `http://127.0.0.1:8000`.
 - Default chat path: `POST /api/chat/stream`
 - Capabilities path: `GET /api/capabilities`
 - Models:
-  - `moonshotai/kimi-k2.5` (default)
-  - `qwen/qwen3.5-397b-a17b`
-  - `z-ai/glm5`
+  - NVIDIA: `moonshotai/kimi-k2.5`, `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
+  - Anthropic: `anthropic/claude-sonnet-4-6` (via sssaicode proxy)
+  - OpenAI: `openai/gpt-5.3-codex` (default, via sssaicode proxy)
+  - Google: `google/gemini-3-flash-preview` (via sssaicode proxy)
 - Agent mode defaults:
-  - qwen/glm: on (if `agent_mode` omitted)
-  - kimi: off (if `agent_mode` omitted)
+  - on: qwen, glm, claude, codex, gemini (if `agent_mode` omitted)
+  - off: kimi (if `agent_mode` omitted)
 - Thinking mode default: `true`
+- OpenAI Responses constraints:
+  - omit top-level `temperature` and `top_p`
+  - always include `reasoning` (`effort: "high"` / `"low"`)
 - Media input: kimi only
 - Search events and reasoning/token streams are shown in dedicated sections.
 
@@ -121,7 +136,12 @@ Backend:
 - `backend/nvidia_client.py` (facade)
 - `backend/model_registry.py` (capabilities source of truth)
 - `backend/model_profile.py`
+- `backend/proxy_chat_model.py` (multi-provider LangChain adapter)
+- `backend/provider_router.py` (registry-driven provider routing)
+- `backend/provider_event_normalizer.py` (upstream error diagnostics)
+- `backend/config.py` (env loading, provider credentials)
 - `backend/message_builder.py`
+- `backend/agent_graph.py` (LangGraph agent)
 - `backend/agent_orchestrator.py`
 - `backend/event_mapper.py`
 - `backend/search_provider.py`

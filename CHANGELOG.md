@@ -2,6 +2,118 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-03 (Fix Multi-Message Loading State)
+
+### Summary
+
+Fixed issue where previously completed answers would show loading-like visual state (flicker, animation replays) when a new question was being streamed in the same conversation. Root cause: `syncSessionToCache` deep-cloned the entire session on every stream event, creating new object references for all messages and forcing re-renders of all `StreamMessage` components.
+
+### Frontend
+
+- **Incremental cache update**: During streaming, only the active stream message is replaced in the React Query cache; other messages retain their original references (`patchStreamMessageInCache` in `useSendMessage.js`)
+- **React.memo on StreamMessage**: Default shallow comparison now naturally skips re-renders for unchanged messages (enabled by incremental updates preserving references)
+- **Defensive `onDone` handler**: Finalizes message `status` to `"done"` even if the server closes the connection without sending a `done` SSE event
+- **Sidebar invalidation reduction**: Session list cache is only invalidated on `done`/`error` events, not on every token
+- **CSS `stream-done` class**: Completed stream messages get `animation: none` to prevent entry animation replays
+
+### Tests
+
+- 3 new unit tests in `MessageList.test.jsx` for multi-turn typing indicator isolation
+- 1 new unit test for `stream-done` CSS class application
+- 5 new tests in `patchStreamMessageInCache.test.js` for incremental cache update correctness and reference preservation
+- 1 new E2E test: multi-turn conversation verifies completed answers have no typing dots and carry `stream-done` class
+
+### Files Modified
+
+- `frontend-react/src/features/chat/useSendMessage.js`: incremental cache updates + defensive onDone
+- `frontend-react/src/components/StreamMessage.jsx`: React.memo + stream-done class
+- `frontend-react/src/styles.css`: `.stream-done` animation override rules
+- `frontend-react/src/__tests__/MessageList.test.jsx`: 4 new test cases
+- `frontend-react/src/__tests__/patchStreamMessageInCache.test.js`: new test file (5 tests)
+- `frontend-react/tests/e2e/chat-stream.spec.ts`: 1 new E2E test
+
+---
+
+## 2026-03-03 (OpenAI Codex 400 Fix + Test Coverage Expansion)
+
+### Summary
+
+Fixed OpenAI Codex streaming returning 400 from the sssaicode proxy due to invalid request body fields. Expanded test coverage for `proxy_chat_model.py` with 19 new tests covering SSE parsing, provider dispatch, utility functions, and edge cases.
+
+### Bug Fixes
+
+- **P9 (400 error)**: Removed `temperature` and `top_p` from OpenAI Responses API request body - the `/responses` endpoint does not accept these as top-level fields, causing the proxy to reject with `status=400 type=request_error`
+- **P10 (reasoning required)**: `reasoning` field is now always included in OpenAI requests - proxy requires it. Uses `effort: "high"` when `thinking_mode=True`, `effort: "low"` when `thinking_mode=False`
+
+### Tests
+
+- **Updated**: `test_openai_invoke_includes_temperature_top_p` -> renamed to `test_openai_body_omits_temperature_top_p` with flipped assertions
+- **New test class `TestIterSseEvents`** (6 tests): direct unit tests for `_iter_sse_events` - basic parsing, multiline data, comment lines, no-blank-separator gateway quirk, empty stream, DONE marker
+- **New test class `TestDispatchEdgeCases`** (4 tests): unsupported provider raises, Anthropic stream body includes system prompt, OpenAI thinking_mode=false produces `reasoning.effort=low`
+- **New test class `TestUtilityFunctions`** (10 tests): `_messages_to_role_content` with ToolMessage, `_detail_from_exception` passthrough and normalization, `_json_post` HTTP errors with/without model_id, `bind_tools` returns copy, `_safe_json_loads` variants
+- **New test class `TestParseEdgeCases`** (3 tests): `_parse_openai_completed` with empty/malformed output, stream fallback with no deltas and no text
+- Total: 189 tests passing (was 155)
+
+### Files Modified
+
+- `backend/proxy_chat_model.py`: `_build_openai_body` - removed `temperature`/`top_p`, always include `reasoning`
+- `tests/test_proxy_chat_model.py`: updated 1 existing test, added 19 new tests across 4 test classes
+
+---
+
+## 2026-03-03 (Multi-Provider Proxy Integration - Claude / Codex / Gemini)
+
+### Summary
+
+Added multi-provider backend support for Anthropic Claude Sonnet 4.6, OpenAI GPT-5.3 Codex, and Google Gemini 3 Flash via `ProxyGatewayChatModel`, a LangChain `BaseChatModel` adapter that routes through the sssaicode proxy. All three providers now support real SSE streaming, agent tool-calling, and normalized error diagnostics.
+
+### Backend
+
+- **New files**:
+  - `backend/proxy_chat_model.py`: LangChain `BaseChatModel` subclass adapting Anthropic Messages API, OpenAI Responses API, and Google generateContent API
+  - `backend/provider_router.py`: registry-driven provider routing (`build_routed_chat_model`)
+  - `backend/provider_event_normalizer.py`: unified upstream error parsing and diagnostics
+- **Modified files**:
+  - `backend/model_registry.py`: added 3 new model entries (`anthropic/claude-sonnet-4-6`, `openai/gpt-5.3-codex` as default, `google/gemini-3-flash-preview`) with provider/protocol/capabilities metadata
+  - `backend/model_profile.py`: added `ProxyGatewayChatModel` construction path for non-NVIDIA providers; base URL normalization for proxy endpoints
+  - `backend/config.py`: added `provider_credentials()` with multi-name env fallback chains (e.g. `ANTHROPIC_API_KEY` -> `CLAUDE_CLIENT_TOKEN_1` -> fallback)
+  - `backend/nvidia_client.py`: replaced direct model construction with `provider_router.build_routed_chat_model()`
+  - `backend/chat_handlers.py`: integrated `provider_event_normalizer` for error diagnostics in both stream and one-shot handlers
+
+### Provider Streaming
+
+- **Anthropic**: `_stream_anthropic` - SSE via `stream: true`, parses `content_block_delta` events (`text_delta` + `thinking_delta`)
+- **OpenAI**: `_stream_openai` - SSE via `stream: true` (proxy requires it), parses `response.output_text.delta` + `response.reasoning_summary_text.delta`; fixed double-text emission with `had_text_deltas` guard
+- **Google**: `_stream_google` - SSE via `streamGenerateContent?alt=sse`, parses chunked `candidates[].content.parts[].text`
+- **OpenAI invoke**: `_invoke_openai` consumes SSE stream and aggregates `response.completed` (proxy rejects `stream: false`)
+
+### Bug Fixes
+
+- P0: OpenAI `_invoke_openai` now uses `stream: true` + SSE aggregation (proxy rejects `stream: false`)
+- P1: `_stream_openai` no longer emits duplicate text from both delta events and `response.completed`
+- P3: Google requests now include `generationConfig` with `temperature`, `topP`, `maxOutputTokens`
+- P4: Google system prompts use `systemInstruction` field instead of injecting as user message
+- P6: `_json_post` error path now uses `normalize_upstream_error` for consistent diagnostics
+- P8: OpenAI requests now follow Responses API constraints: omit top-level `temperature`/`top_p` and always include `reasoning`
+
+### Tests
+
+- New test file: `tests/test_proxy_chat_model.py` - covers invoke + stream for all 3 providers
+- New test file: `tests/test_provider_event_normalizer.py` - error payload parsing and normalization
+- New test file: `tests/test_model_profile.py` - provider construction and env compat names
+- New tests: `test_google_request_includes_generation_config`, `test_google_system_prompt_uses_system_instruction`, `test_openai_stream_no_double_text_when_deltas_present`, `test_openai_body_omits_temperature_top_p`, `test_openai_body_always_includes_reasoning`, `test_anthropic_stream_text_deltas`, `test_anthropic_stream_thinking_deltas`, `test_anthropic_stream_sends_stream_true`, `test_google_stream_text_chunks`, `test_google_stream_uses_stream_endpoint`
+- Total: 155 tests passing
+
+### Configuration
+
+- Env variables for non-NVIDIA providers:
+  - `ANTHROPIC_API_KEY` / `CLAUDE_CLIENT_TOKEN_1` / `CLAUDE_CLIENT_TOKEN`
+  - `OPENAI_API_KEY` / `CODEX_TOKEN_1` / `CODEX_TOKEN`
+  - `GOOGLE_API_KEY` / `GEMINI_API_KEY_1` / `GEMINI_API_KEY`
+  - `ANTHROPIC_BASE_URL` / `CLAUDE_API_URL`
+  - `OPENAI_BASE_URL` / `CODEX_API_URL`
+  - `GOOGLE_BASE_URL` / `GOOGLE_GEMINI_BASE_URL`
+
 ## 2026-03-02 (Web Loader Parallelization and Timeout Controls)
 
 ### Summary
@@ -90,7 +202,7 @@ Frontend chat was refactored into a session-centric architecture with clear data
 
 ### Summary
 
-Backend agent system rewritten from LangChain `AgentExecutor` (3-step, 1 tool) to LangGraph `StateGraph` with Plan → Act → Observe → Reflect loop, multiple tools, configurable iteration limits, and token-by-token streaming of final answers.
+Backend agent system rewritten from LangChain `AgentExecutor` (3-step, 1 tool) to LangGraph `StateGraph` with Plan -> Act -> Observe -> Reflect loop, multiple tools, configurable iteration limits, and token-by-token streaming of final answers.
 
 ### Agent Architecture
 

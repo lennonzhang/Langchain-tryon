@@ -16,6 +16,8 @@ build/
 .venv/
 venv/
 .python-version
+opencode.json
+api_examples.py
 
 .env
 .env.*

@@ -67,6 +67,7 @@ function LegacyApp() {
 }
 
 function AppContent() {
+  const autoScrollThresholdPx = 150;
   const { models, model, setModel, supportsThinking, supportsMedia } = useCapabilitiesQuery();
   const [webSearch, setWebSearch] = useState(false);
   const [thinkingMode, setThinkingMode] = useState(true);
@@ -75,6 +76,7 @@ function AppContent() {
     useAttachments(supportsMedia);
 
   const messagesRef = useRef(null);
+  const stickToBottomRef = useRef(true);
 
   const sessionListQuery = useSessionListQuery();
   const sessions = sessionListQuery.data || [];
@@ -127,11 +129,17 @@ function AppContent() {
     ? activeSession.messages
     : [{ id: "connected", role: "assistant", content: CONNECTED_TEXT }];
 
+  function handleMessagesScroll(event) {
+    const el = event?.currentTarget || messagesRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceToBottom <= autoScrollThresholdPx;
+  }
+
   useEffect(() => {
     const el = messagesRef.current;
     if (!el) return;
-    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
-    if (!isNearBottom) return;
+    if (!stickToBottomRef.current) return;
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
@@ -175,7 +183,13 @@ function AppContent() {
           <span>{isPending ? "Generating response..." : "Ready"}</span>
         </div>
 
-        <MessageList messages={messages} isPending={isPending} currentRequestId={currentRequestId} ref={messagesRef} />
+        <MessageList
+          messages={messages}
+          isPending={isPending}
+          currentRequestId={currentRequestId}
+          ref={messagesRef}
+          onScroll={handleMessagesScroll}
+        />
 
         <Composer
           models={models}

@@ -21,8 +21,8 @@ Repository-level guide for coding agents.
 - Capabilities path: `GET /api/capabilities`
 - `thinking_mode` default: `true`
 - `agent_mode` default when omitted:
-  - enabled: `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
-  - disabled: `moonshotai/kimi-k2.5`
+  - enabled: qwen, glm, claude, codex, gemini (all agent-capable models)
+  - disabled: kimi
 
 ## SSE Contract
 
@@ -34,11 +34,14 @@ Repository-level guide for coding agents.
 
 ## Model Policy
 
-- Supported:
-  - `moonshotai/kimi-k2.5` (default)
-  - `qwen/qwen3.5-397b-a17b`
-  - `z-ai/glm5`
-- Single source of truth: `backend/model_registry.py`
+- Supported (source of truth: `backend/model_registry.py`):
+  - NVIDIA: `moonshotai/kimi-k2.5`, `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
+  - Anthropic: `anthropic/claude-sonnet-4-6`
+  - OpenAI: `openai/gpt-5.3-codex` (default)
+  - Google: `google/gemini-3-flash-preview`
+- Non-NVIDIA models use `ProxyGatewayChatModel` with real SSE streaming
+- Provider protocols: `anthropic_messages`, `openai_responses`, `google_generate_content`
+- OpenAI Responses API: do not send `temperature`/`top_p` as top-level fields; always include `reasoning` (`effort: "high"` or `"low"`)
 - If model supports reasoning and `thinking_mode=true`, stream `reasoning` events
 
 ## API Payload
@@ -48,7 +51,10 @@ Repository-level guide for coding agents.
 ## Architecture Rules
 
 - Keep `backend/nvidia_client.py` as facade.
-- Put detailed logic in extracted modules (`model_profile`, `message_builder`, `agent_graph`, `agent_orchestrator`, `event_mapper`, `search_provider`, `schemas`, `tools_registry`).
+- Put detailed logic in extracted modules (`model_profile`, `message_builder`, `agent_graph`, `agent_orchestrator`, `event_mapper`, `search_provider`, `schemas`, `tools_registry`, `proxy_chat_model`, `provider_router`, `provider_event_normalizer`).
+- Non-NVIDIA providers go through `ProxyGatewayChatModel`; do not add provider-specific logic to `nvidia_client.py`.
+- Provider routing is registry-driven (`model_registry.py` -> `provider_router.py` -> `model_profile.py`).
+- All providers must implement real SSE streaming (no fake-stream via full response).
 - Use `SearchProvider` for both agent and non-agent search event emission.
 - Do not rename SSE events silently.
 - Update tests + docs together.
@@ -71,6 +77,10 @@ pnpm run build
 
 - Model registry: `backend/model_registry.py`
 - Model profile/runtime params: `backend/model_profile.py`
+- Multi-provider LangChain adapter: `backend/proxy_chat_model.py`
+- Provider routing: `backend/provider_router.py`
+- Upstream error normalization: `backend/provider_event_normalizer.py`
+- Env/credentials: `backend/config.py`
 - Message assembly/token estimate: `backend/message_builder.py`
 - Agent graph (LangGraph): `backend/agent_graph.py`
 - Agent orchestration: `backend/agent_orchestrator.py`

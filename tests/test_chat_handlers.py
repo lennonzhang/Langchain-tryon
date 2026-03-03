@@ -1,5 +1,7 @@
 import json
+import io
 import unittest
+from urllib import error as urlerror
 from unittest.mock import patch
 
 from backend.chat_handlers import handle_chat_once, handle_chat_stream
@@ -265,6 +267,54 @@ class TestChatHandlers(unittest.TestCase):
         self.assertEqual(send_sse_mock.call_count, 2)
         self.assertEqual(send_sse_mock.call_args_list[0][0][1]["type"], "error")
         self.assertEqual(send_sse_mock.call_args_list[1][0][1], {"type": "done", "finish_reason": "error"})
+
+    def test_handle_chat_stream_generic_exception_contains_provider_protocol_detail(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": [], "model": "openai/gpt-5.3-codex"},
+            ),
+            patch("backend.chat_handlers.init_sse"),
+            patch("backend.chat_handlers.stream_chat", side_effect=RuntimeError("boom")),
+            patch("backend.chat_handlers.send_sse_event") as send_sse_mock,
+        ):
+            handle_chat_stream(handler, "api-key")
+
+        error_payload = send_sse_mock.call_args_list[0][0][1]
+        self.assertEqual(error_payload["type"], "error")
+        self.assertIn("provider=openai", error_payload["error"])
+        self.assertIn("protocol=openai_responses", error_payload["error"])
+        self.assertIn("boom", error_payload["error"])
+
+    def test_handle_chat_once_http_error_detail_is_normalized(self):
+        handler = object()
+        http_err = urlerror.HTTPError(
+            url="https://x/api/v1/responses",
+            code=400,
+            msg="Bad Request",
+            hdrs=None,
+            fp=io.BytesIO(
+                b'{"type":"error","error":{"type":"invalid_request_error","message":"bad req"}}',
+            ),
+        )
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                return_value={"message": "hello", "history": [], "model": "openai/gpt-5.3-codex"},
+            ),
+            patch("backend.chat_handlers.chat_once", side_effect=http_err),
+            patch("backend.chat_handlers.send_json") as send_json_mock,
+        ):
+            handle_chat_once(handler, "api-key")
+
+        status = send_json_mock.call_args[0][1]
+        payload = send_json_mock.call_args[0][2]
+        self.assertEqual(status, 502)
+        self.assertEqual(payload["error"], "Upstream HTTP error")
+        self.assertIn("provider=openai", payload["detail"])
+        self.assertIn("protocol=openai_responses", payload["detail"])
+        self.assertIn("type=invalid_request_error", payload["detail"])
 
     def test_handle_chat_stream_debug_disabled_does_not_log(self):
         handler = object()

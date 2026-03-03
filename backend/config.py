@@ -47,6 +47,12 @@ def load_api_key(base_dir: Path | None = None) -> str:
     if env_key:
         return env_key
 
+    # Fallback for multi-provider default models.
+    for key_name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
+        fallback = os.getenv(key_name, "").strip()
+        if fallback:
+            return fallback
+
     raise RuntimeError("No API key found. Set NVIDIA_API_KEY in system env or .env.")
 
 
@@ -56,3 +62,54 @@ def resolve_model(model: str | None) -> str:
     if isinstance(model, str) and get_by_id(model) is not None:
         return model
     return get_default()["id"]
+
+
+def provider_credentials(provider: str, fallback_api_key: str | None = None) -> tuple[str, str | None]:
+    """Return ``(api_key, base_url)`` for provider with safe fallbacks."""
+    provider_key = str(provider or "nvidia").lower()
+
+    if provider_key == "anthropic":
+        api_key = (
+            os.getenv("ANTHROPIC_API_KEY", "").strip()
+            or os.getenv("CLAUDE_CLIENT_TOKEN_1", "").strip()
+            or os.getenv("CLAUDE_CLIENT_TOKEN", "").strip()
+            or (fallback_api_key or "").strip()
+        )
+        base_url = (
+            os.getenv("ANTHROPIC_BASE_URL", "").strip()
+            or os.getenv("CLAUDE_API_URL", "").strip()
+            or None
+        )
+        return api_key, base_url
+
+    if provider_key == "openai":
+        api_key = (
+            os.getenv("OPENAI_API_KEY", "").strip()
+            or os.getenv("CODEX_TOKEN_1", "").strip()
+            or os.getenv("CODEX_TOKEN", "").strip()
+            or (fallback_api_key or "").strip()
+        )
+        base_url = (
+            os.getenv("OPENAI_BASE_URL", "").strip()
+            or os.getenv("CODEX_API_URL", "").strip()
+            or None
+        )
+        return api_key, base_url
+
+    if provider_key == "google":
+        api_key = (
+            os.getenv("GOOGLE_API_KEY", "").strip()
+            or os.getenv("GEMINI_API_KEY_1", "").strip()
+            or os.getenv("GEMINI_API_KEY", "").strip()
+            or (fallback_api_key or "").strip()
+        )
+        base_url = (
+            os.getenv("GOOGLE_BASE_URL", "").strip()
+            or os.getenv("GOOGLE_GEMINI_BASE_URL", "").strip()
+            or None
+        )
+        return api_key, base_url
+
+    api_key = os.getenv("NVIDIA_API_KEY", "").strip() or (fallback_api_key or "").strip()
+    base_url = os.getenv("NVIDIA_BASE_URL", "").strip() or None
+    return api_key, base_url

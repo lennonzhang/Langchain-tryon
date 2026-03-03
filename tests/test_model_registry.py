@@ -8,6 +8,9 @@ from backend.model_registry import (
     get_default,
     get_ids,
     get_params,
+    get_protocol,
+    get_provider,
+    get_upstream_model,
     supports,
 )
 
@@ -31,6 +34,9 @@ class TestModelRegistry(unittest.TestCase):
         self.assertIn("moonshotai/kimi-k2.5", ids)
         self.assertIn("qwen/qwen3.5-397b-a17b", ids)
         self.assertIn("z-ai/glm5", ids)
+        self.assertIn("anthropic/claude-sonnet-4-6", ids)
+        self.assertIn("openai/gpt-5.3-codex", ids)
+        self.assertIn("google/gemini-3-flash-preview", ids)
 
     # ── get_by_id ────────────────────────────────────────────────
 
@@ -44,9 +50,9 @@ class TestModelRegistry(unittest.TestCase):
 
     # ── get_default ──────────────────────────────────────────────
 
-    def test_get_default_is_kimi(self):
+    def test_get_default_is_codex(self):
         default = get_default()
-        self.assertEqual(default["id"], "moonshotai/kimi-k2.5")
+        self.assertEqual(default["id"], "openai/gpt-5.3-codex")
         self.assertTrue(default["default"])
 
     def test_exactly_one_default(self):
@@ -115,6 +121,12 @@ class TestModelRegistry(unittest.TestCase):
         p1["temperature_thinking"] = 999
         p2 = get_params("moonshotai/kimi-k2.5")
         self.assertEqual(p2["temperature_thinking"], 1.0)
+
+    def test_provider_metadata(self):
+        self.assertEqual(get_provider("moonshotai/kimi-k2.5"), "nvidia")
+        self.assertEqual(get_provider("openai/gpt-5.3-codex"), "openai")
+        self.assertEqual(get_upstream_model("anthropic/claude-sonnet-4-6"), "claude-sonnet-4-6")
+        self.assertEqual(get_protocol("google/gemini-3-flash-preview"), "google_generate_content")
 
     # ── capabilities_response ────────────────────────────────────
 

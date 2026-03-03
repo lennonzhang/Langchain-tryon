@@ -401,6 +401,14 @@ body::after {
   animation-duration: 0.5s;
 }
 
+.msg.assistant.stream.stream-done {
+  animation: none;
+}
+
+.msg.assistant.stream.stream-done .assistant-section {
+  animation: none;
+}
+
 /* ---- Assistant sections ---- */
 
 .assistant-section {

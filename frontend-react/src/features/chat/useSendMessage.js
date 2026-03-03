@@ -17,6 +17,17 @@ async function syncSessionToCache(queryClient, repository, sessionId) {
   return session;
 }
 
+function patchStreamMessageInCache(queryClient, sessionId, streamId, event) {
+  const prev = queryClient.getQueryData(sessionDetailQueryKey(sessionId));
+  if (!prev) return;
+  queryClient.setQueryData(sessionDetailQueryKey(sessionId), {
+    ...prev,
+    messages: prev.messages.map((msg) =>
+      msg.id === streamId ? mapStreamEventToPatch(msg, event) : msg
+    ),
+  });
+}
+
 export function useSendMessage({
   model,
   webSearch,
@@ -118,9 +129,9 @@ export function useSendMessage({
           }
 
           await repository.updateMessage(sessionId, streamId, (message) => mapStreamEventToPatch(message, streamEvent));
-          const updated = await syncSessionToCache(queryClient, repository, sessionId);
 
           if (streamEvent.type === "done") {
+            const updated = await syncSessionToCache(queryClient, repository, sessionId);
             const streamEntry = updated?.messages?.find((msg) => msg.id === streamId);
             const failed = streamEntry?.status === "failed";
             if (failed) {
@@ -128,12 +139,21 @@ export function useSendMessage({
             } else {
               useChatUiStore.getState().finishRequest(sessionId);
             }
+          } else {
+            patchStreamMessageInCache(queryClient, sessionId, streamId, streamEvent);
           }
         },
-        onDone: () => {
-          if (useChatUiStore.getState().isCurrentRequest(sessionId, requestId)) {
-            useChatUiStore.getState().finishRequest(sessionId);
+        onDone: async () => {
+          if (!useChatUiStore.getState().isCurrentRequest(sessionId, requestId)) {
+            return;
           }
+          await repository.updateMessage(sessionId, streamId, (msg) => {
+            if (msg.status !== "streaming") return msg;
+            const answer = !msg.answer || msg.answer === "Thinking..." ? "(empty response)" : msg.answer;
+            return { ...msg, status: "done", answer };
+          });
+          await syncSessionToCache(queryClient, repository, sessionId);
+          useChatUiStore.getState().finishRequest(sessionId);
         },
         onTransportError: async (errorText) => {
           if (!useChatUiStore.getState().isCurrentRequest(sessionId, requestId)) {

@@ -16,9 +16,9 @@ from .config import resolve_model
 from .model_registry import supports
 from .search_provider import SearchProvider
 
-from .model_profile import build_chat_model as _build_chat_model
 from .model_profile import proxy_env_guard as _proxy_env_guard
 from .model_profile import stream_or_invoke_kwargs as _stream_or_invoke_kwargs
+from .provider_router import build_routed_chat_model as _build_chat_model
 
 from .message_builder import (
     build_messages as _build_messages,

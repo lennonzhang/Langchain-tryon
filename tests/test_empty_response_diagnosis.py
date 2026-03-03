@@ -1,4 +1,4 @@
-﻿"""Tests verifying empty-response handling for streaming paths."""
+"""Tests verifying empty-response handling for streaming paths."""
 
 from __future__ import annotations
 
@@ -36,7 +36,6 @@ def _error_events(events):
     return [e for e in events if e.get("type") == "error"]
 
 
-_AGENTIC_FALLBACK = "(The agent did not produce a final answer. Please try again.)"
 _DIRECT_FALLBACK = "(Model returned no visible answer. Try disabling thinking mode.)"
 
 

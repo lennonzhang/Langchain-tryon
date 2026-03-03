@@ -7,6 +7,7 @@ from urllib import error
 from .config import resolve_model
 from .http_utils import init_sse, read_json_body, send_json, send_sse_event
 from .nvidia_client import chat_once, stream_chat
+from .provider_event_normalizer import normalize_upstream_error, normalized_error_detail
 from .schemas import ChatRequest
 
 logger = logging.getLogger(__name__)
@@ -113,15 +114,24 @@ def handle_chat_once(handler, api_key: str, debug_stream: bool = False) -> None:
         )
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
+        info = normalize_upstream_error(
+            resolved_model,
+            status=getattr(exc, "code", None),
+            raw_body=detail,
+        )
         _debug_log(
             debug_stream,
             req.request_id,
             resolved_model,
             "chat_once_error",
             error_type="http_error",
-            preview=f'"{_single_line_preview(detail)}"',
+            preview=f'"{_single_line_preview(normalized_error_detail(info))}"',
         )
-        send_json(handler, 502, {"error": "Upstream HTTP error", "detail": detail[:500]})
+        send_json(
+            handler,
+            502,
+            {"error": "Upstream HTTP error", "detail": normalized_error_detail(info)[:500]},
+        )
         return
     except TimeoutError as exc:
         _debug_log(
@@ -154,7 +164,15 @@ def handle_chat_once(handler, api_key: str, debug_stream: bool = False) -> None:
                 {"error": "Upstream gateway timeout", "detail": str(exc)[:500]},
             )
             return
-        send_json(handler, 502, {"error": "Upstream request failed", "detail": str(exc)})
+        info = normalize_upstream_error(
+            resolved_model,
+            raw_body=str(exc),
+        )
+        send_json(
+            handler,
+            502,
+            {"error": "Upstream request failed", "detail": normalized_error_detail(info)[:500]},
+        )
         return
 
     _debug_log(
@@ -245,4 +263,8 @@ def handle_chat_stream(handler, api_key: str, debug_stream: bool = False) -> Non
         if _is_gateway_timeout_error(exc):
             _emit_error_and_done("Upstream gateway timeout")
             return
-        _emit_error_and_done(str(exc))
+        info = normalize_upstream_error(
+            resolved_model,
+            raw_body=str(exc),
+        )
+        _emit_error_and_done(normalized_error_detail(info))

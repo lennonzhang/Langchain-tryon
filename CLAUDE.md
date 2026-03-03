@@ -36,10 +36,13 @@ pnpm test:e2e
 ## Architecture Map
 
 - `backend/nvidia_client.py`: public facade (`chat_once`, `stream_chat`)
-- `backend/model_registry.py`: model capability source of truth
-- `backend/model_profile.py`: model params/build logic
+- `backend/model_registry.py`: model capability source of truth (provider, protocol, params)
+- `backend/model_profile.py`: model params/build logic, env resolution
+- `backend/proxy_chat_model.py`: LangChain `BaseChatModel` adapter for non-NVIDIA providers (Anthropic, OpenAI, Google)
+- `backend/provider_router.py`: provider-aware model instantiation
+- `backend/provider_event_normalizer.py`: unified upstream error diagnostics
 - `backend/message_builder.py`: message/media assembly + token estimate
-- `backend/agent_graph.py`: LangGraph StateGraph (Plan → Act → Observe → Reflect)
+- `backend/agent_graph.py`: LangGraph StateGraph (Plan -> Act -> Observe -> Reflect)
 - `backend/agent_orchestrator.py`: agent entry point, builds graph and invokes
 - `backend/event_mapper.py`: direct/agent streaming event generation
 - `backend/search_provider.py`: unified search event emission
@@ -47,6 +50,7 @@ pnpm test:e2e
 - `backend/schemas.py`: request schema parsing
 - `backend/chat_handlers.py`: route handlers
 - `backend/http_utils.py`: JSON/SSE helpers
+- `backend/config.py`: env loading, API key/base URL resolution per provider
 - `frontend-react/src/App.jsx`: frontend composition root
 - `frontend-react/src/app/AppProviders.jsx`: frontend provider root (query + repository)
 - `frontend-react/src/features/sessions/*`: session list/data hooks
@@ -62,6 +66,10 @@ pnpm test:e2e
 
 - `backend/model_registry.py`: model capabilities/defaults source of truth
 - `backend/model_profile.py`: model construction and invoke/stream kwargs
+- `backend/proxy_chat_model.py`: multi-provider LangChain adapter (invoke + SSE stream)
+- `backend/provider_router.py`: registry-driven provider routing
+- `backend/provider_event_normalizer.py`: upstream error normalization
+- `backend/config.py`: env loading, `provider_credentials()`, `resolve_model()`
 - `backend/message_builder.py`: history/media normalization, message construction
 - `backend/agent_graph.py`: LangGraph agent graph definition (nodes, edges, state)
 - `backend/agent_orchestrator.py`: agent entry point and graph invocation
@@ -105,11 +113,30 @@ SSE events:
 
 ## Model Rules
 
-- Supported: `moonshotai/kimi-k2.5` (default), `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
+- Supported models (source of truth: `backend/model_registry.py`):
+  - NVIDIA: `moonshotai/kimi-k2.5`, `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
+  - Anthropic: `anthropic/claude-sonnet-4-6` (via sssaicode proxy)
+  - OpenAI: `openai/gpt-5.3-codex` (default, via sssaicode proxy)
+  - Google: `google/gemini-3-flash-preview` (via sssaicode proxy)
+- Default model: `openai/gpt-5.3-codex`
 - Auto `agent_mode` when omitted:
-  - on: qwen, glm
+  - on: qwen, glm, claude, codex, gemini
   - off: kimi
 - If model supports reasoning and `thinking_mode=true`, stream reasoning events
+
+## Multi-Provider Architecture
+
+- All non-NVIDIA models route through `ProxyGatewayChatModel` (LangChain `BaseChatModel`)
+- Provider protocols:
+  - `anthropic_messages`: POST `/messages` (Anthropic Messages API, SSE stream)
+  - `openai_responses`: POST `/responses` (OpenAI Responses API, SSE stream, `stream: true` required, `reasoning` required)
+  - `google_generate_content`: POST `/models/{model}:generateContent` (invoke) or `:streamGenerateContent?alt=sse` (stream)
+- OpenAI Responses API constraints:
+  - `temperature` / `top_p` must NOT be sent as top-level fields (causes 400)
+  - `reasoning` must always be present (`effort: "high"` when thinking, `effort: "low"` otherwise)
+- Proxy base URLs default to `claude2.sssaicode.com` (configurable via env)
+- API key resolution: provider-specific env -> compat names (e.g. `CLAUDE_CLIENT_TOKEN_1`) -> fallback
+- Error normalization: `provider_event_normalizer.py` produces `provider=X | protocol=Y | status=Z | message=...`
 
 ## Frontend Notes
 

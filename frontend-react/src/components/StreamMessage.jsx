@@ -1,9 +1,10 @@
+import { memo } from "react";
 import CollapsibleSection from "./CollapsibleSection";
 import RichBlock from "./RichBlock";
 
-export default function StreamMessage({ msg, showTyping }) {
+function StreamMessage({ msg, showTyping }) {
   return (
-    <div className="msg assistant stream">
+    <div className={`msg assistant stream${msg.status === "done" ? " stream-done" : ""}`}>
       {msg.search.state !== "hidden" && (
         <CollapsibleSection title="Search" className="search" defaultOpen={true}>
           <div data-testid="search-panel">
@@ -71,3 +72,5 @@ export default function StreamMessage({ msg, showTyping }) {
     </div>
   );
 }
+
+export default memo(StreamMessage);
