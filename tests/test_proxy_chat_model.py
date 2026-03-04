@@ -104,11 +104,11 @@ class TestProxyChatModel(unittest.TestCase):
                 }
             ],
             "usageMetadata": {"promptTokenCount": 8, "candidatesTokenCount": 3},
-            "modelVersion": "gemini-3-flash-preview",
+            "modelVersion": "gemini-3-pro-preview",
         }
         model = ProxyGatewayChatModel(
             provider="google",
-            model="gemini-3-flash-preview",
+            model="gemini-3-pro-preview",
             api_key="k",
             base_url="https://x/api/v1beta",
         )
@@ -134,7 +134,7 @@ class TestProxyChatModel(unittest.TestCase):
 
         model = ProxyGatewayChatModel(
             provider="google",
-            model="gemini-3-flash-preview",
+            model="gemini-3-pro-preview",
             api_key="k",
             base_url="https://x/api/v1beta",
             temperature=0.5,
@@ -164,7 +164,7 @@ class TestProxyChatModel(unittest.TestCase):
 
         model = ProxyGatewayChatModel(
             provider="google",
-            model="gemini-3-flash-preview",
+            model="gemini-3-pro-preview",
             api_key="k",
             base_url="https://x/api/v1beta",
         )
@@ -425,7 +425,7 @@ class TestProxyChatModel(unittest.TestCase):
 
         model = ProxyGatewayChatModel(
             provider="google",
-            model="gemini-3-flash-preview",
+            model="gemini-3-pro-preview",
             api_key="k",
             base_url="https://x/api/v1beta",
         )
@@ -554,7 +554,7 @@ class TestProxyChatModel(unittest.TestCase):
         ]
         model = ProxyGatewayChatModel(
             provider="google",
-            model="gemini-2.5-flash",
+            model="gemini-3-pro-preview",
             api_key="k",
             base_url="https://x/api/v1beta",
         )
@@ -579,7 +579,7 @@ class TestProxyChatModel(unittest.TestCase):
 
         model = ProxyGatewayChatModel(
             provider="google",
-            model="gemini-2.5-flash",
+            model="gemini-3-pro-preview",
             api_key="k",
             base_url="https://x/api/v1beta",
         )
@@ -876,6 +876,37 @@ class TestParseEdgeCases(unittest.TestCase):
             self.assertRaises(ValueError),
         ):
             list(model.stream([HumanMessage(content="hi")]))
+
+
+class TestSseParseLogging(unittest.TestCase):
+    """Verify that malformed SSE events produce a warning log."""
+
+    def test_anthropic_stream_logs_malformed_event(self):
+        model = ProxyGatewayChatModel(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="test-key",
+            base_url="https://example.com/api/v1",
+        )
+        # SSE with one malformed data line followed by message_stop
+        lines = [
+            b"data: {not valid json}\n",
+            b"\n",
+            b'data: {"type":"message_stop"}\n',
+            b"\n",
+        ]
+        fake_resp = _FakeHttpResponse(b"", lines=lines)
+        with (
+            patch("backend.proxy_chat_model.request.urlopen", return_value=fake_resp),
+            patch("backend.proxy_chat_model.logger.warning") as warn_mock,
+        ):
+            # Stream produces no valid chunks, so LangChain raises ValueError
+            try:
+                list(model.stream([HumanMessage(content="hi")]))
+            except ValueError:
+                pass
+        warn_mock.assert_called()
+        self.assertIn("malformed", warn_mock.call_args[0][0].lower())
 
 
 if __name__ == "__main__":

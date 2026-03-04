@@ -83,14 +83,14 @@ class TestModelProfileProviders(unittest.TestCase):
         ):
             model = build_chat_model(
                 api_key="fallback",
-                model="google/gemini-3-flash-preview",
+                model="google/gemini-3-pro-preview",
                 thinking_mode=True,
                 provider="google",
             )
 
         self.assertIsInstance(model, ProxyGatewayChatModel)
         self.assertEqual(model.provider, "google")
-        self.assertEqual(model.model, "gemini-3-flash-preview")
+        self.assertEqual(model.model, "gemini-3-pro-preview")
         self.assertEqual(model.api_key, "gg-key")
         self.assertEqual(model.base_url, "https://x.test/api/v1beta")
 
@@ -121,7 +121,7 @@ class TestModelProfileProviders(unittest.TestCase):
             )
             gemini = build_chat_model(
                 api_key="fallback",
-                model="google/gemini-3-flash-preview",
+                model="google/gemini-3-pro-preview",
                 thinking_mode=True,
                 provider="google",
             )

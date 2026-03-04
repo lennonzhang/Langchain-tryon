@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseEventStream } from "../stream";
+import { parseEventStream } from "../shared/lib/sse/parseEventStream";
 
 class FixtureReader {
   constructor(text, chunkSize = text.length) {

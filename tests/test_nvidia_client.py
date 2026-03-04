@@ -528,7 +528,7 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertFalse(_should_use_agentic_flow("moonshotai/kimi-k2.5", None))
         self.assertTrue(_should_use_agentic_flow("anthropic/claude-sonnet-4-6", None))
         self.assertTrue(_should_use_agentic_flow("openai/gpt-5.3-codex", None))
-        self.assertTrue(_should_use_agentic_flow("google/gemini-3-flash-preview", None))
+        self.assertTrue(_should_use_agentic_flow("google/gemini-3-pro-preview", None))
         self.assertFalse(_should_use_agentic_flow("z-ai/glm5", False))
         self.assertFalse(_should_use_agentic_flow("moonshotai/kimi-k2.5", True))
         self.assertTrue(_should_use_agentic_flow("z-ai/glm5", True))

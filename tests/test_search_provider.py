@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from backend.search_provider import SearchProvider
 
@@ -46,6 +47,20 @@ class TestSearchProvider(unittest.TestCase):
         self.assertEqual(context, "")
         self.assertEqual(results, [])
         self.assertEqual(events[1], {"type": "search_done", "results": []})
+
+
+    def test_search_error_logs_warning(self):
+        events = []
+
+        def failing_search(_query):
+            raise RuntimeError("boom")
+
+        provider = SearchProvider(failing_search, events.append)
+        with patch("backend.search_provider.logger.warning") as warn_mock:
+            provider.search_with_events("q")
+
+        warn_mock.assert_called_once()
+        self.assertIn("boom", str(warn_mock.call_args))
 
 
 if __name__ == "__main__":

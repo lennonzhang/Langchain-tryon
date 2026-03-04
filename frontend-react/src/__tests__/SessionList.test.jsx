@@ -56,4 +56,23 @@ describe("SessionList", () => {
 
     expect(screen.getByText("No conversation yet.")).toBeInTheDocument();
   });
+
+  it("marks running session and disables its delete button", () => {
+    const onDelete = vi.fn();
+
+    render(
+      <SessionList
+        sessions={sessions}
+        activeSessionId="s1"
+        runningSessionId="s2"
+        filter=""
+        onSelect={() => {}}
+        onDelete={onDelete}
+      />,
+    );
+
+    expect(screen.getByLabelText("Running Second")).toBeInTheDocument();
+    expect(screen.getByLabelText("Delete Second")).toBeDisabled();
+    expect(screen.getByLabelText("Delete First")).not.toBeDisabled();
+  });
 });

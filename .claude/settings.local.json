@@ -11,7 +11,9 @@
       "Bash(set \"PATH=d:\\\\Code\\\\Langchain-tryon\\\\.tools\\\\node-v24.13.1-win-x64;%PATH%\")",
       "Bash(cd:*)",
       "Bash(export PATH=\"/d/Code/Langchain-tryon/.tools/node-v24.13.1-win-x64:$PATH\")",
-      "Bash(pnpm test)"
+      "Bash(pnpm test)",
+      "Bash(python -m unittest discover -s tests -v)",
+      "Bash(pnpm run build)"
     ]
   }
 }

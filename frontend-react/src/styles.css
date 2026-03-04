@@ -293,6 +293,22 @@ body::after {
   letter-spacing: 0.01em;
 }
 
+.status-stop {
+  margin-left: auto;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.status-stop:hover {
+  background: var(--panel-soft);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -1447,6 +1463,10 @@ input:disabled {
   padding: 14px 20px;
 }
 
+.sidebar-backdrop {
+  display: none;
+}
+
 .session-sidebar {
   z-index: 2;
   background: rgba(255, 255, 255, 0.78);
@@ -1503,6 +1523,25 @@ input:disabled {
   gap: 8px;
 }
 
+.session-list li {
+  position: relative;
+}
+
+.session-running-badge {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 1;
+  border: 1px solid rgba(13, 148, 136, 0.35);
+  border-radius: 999px;
+  background: rgba(240, 253, 250, 0.9);
+  color: #0f766e;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+}
+
 .session-item {
   width: 100%;
   border: 1px solid rgba(203, 213, 225, 0.7);
@@ -1544,10 +1583,117 @@ input:disabled {
   cursor: pointer;
 }
 
+.session-delete:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
 .session-empty {
   color: var(--muted);
   font-size: 12px;
   padding: 10px 12px;
+}
+
+/* --- Skeleton loading --- */
+
+@keyframes shimmer-skeleton {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--panel-soft, #e8edf6) 25%, var(--bg-1, #f0f4ff) 50%, var(--panel-soft, #e8edf6) 75%);
+  background-size: 200% 100%;
+  animation: shimmer-skeleton 1.5s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
+
+.skeleton-msg {
+  height: 60px;
+  margin-bottom: 12px;
+  max-width: 70%;
+}
+
+.skeleton-msg:nth-child(2) {
+  max-width: 50%;
+  margin-left: auto;
+}
+
+.skeleton-msg:nth-child(3) {
+  max-width: 80%;
+}
+
+/* --- Error boundary fallback --- */
+
+.error-boundary-fallback {
+  padding: 16px 20px;
+  background: var(--warn-bg, #fff8e1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.error-boundary-fallback button {
+  margin-top: 8px;
+  padding: 6px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.error-boundary-fallback button:hover {
+  background: var(--panel-soft);
+}
+
+/* --- Copy button --- */
+
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin-left: auto;
+}
+
+.msg:hover .copy-btn,
+.assistant-title:hover .copy-btn {
+  opacity: 1;
+}
+
+.copy-btn:hover {
+  background: var(--panel-soft);
+  color: var(--ink);
+}
+
+.copy-btn.copied {
+  opacity: 1;
+  color: var(--teal, #0d9488);
+  border-color: var(--teal, #0d9488);
+}
+
+.assistant-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- content-visibility for completed messages --- */
+
+.msg.assistant:not(.stream),
+.msg.stream-done {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 
 @media (max-width: 980px) {
@@ -1561,5 +1707,33 @@ input:disabled {
     border-radius: 0;
     border-left: 0;
     border-right: 0;
+  }
+}
+
+/* --- Mobile breakpoint --- */
+
+@media (max-width: 600px) {
+  .header h1 { font-size: 20px; }
+  .header-meta { display: none; }
+  .settings-card { flex-direction: column; gap: 8px; }
+  .model-field { width: 100%; }
+  .input-shell { padding: 8px; }
+
+  .copy-btn { opacity: 1; }
+
+  .session-sidebar.is-open {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    width: 100%;
+    border-radius: 0;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+    background: rgba(0, 0, 0, 0.4);
   }
 }

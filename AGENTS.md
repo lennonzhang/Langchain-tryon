@@ -31,6 +31,8 @@ Repository-level guide for coding agents.
 - Every event includes `v: 1`
 - Include `request_id` when available
 - Error invariant: `error` must be followed by `done` with `finish_reason: "error"`
+- Agent timeout: 600s soft deadline; exceeding emits `error` + `done(error)`
+- Request body limit: 10 MB (413 if exceeded); message max 100k chars; history max 100 items; images max 10 items
 
 ## Model Policy
 
@@ -38,7 +40,7 @@ Repository-level guide for coding agents.
   - NVIDIA: `moonshotai/kimi-k2.5`, `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
   - Anthropic: `anthropic/claude-sonnet-4-6`
   - OpenAI: `openai/gpt-5.3-codex` (default)
-  - Google: `google/gemini-3-flash-preview`
+  - Google: `google/gemini-3-pro-preview`
 - Non-NVIDIA models use `ProxyGatewayChatModel` with real SSE streaming
 - Provider protocols: `anthropic_messages`, `openai_responses`, `google_generate_content`
 - OpenAI Responses API: do not send `temperature`/`top_p` as top-level fields; always include `reasoning` (`effort: "high"` or `"low"`)
@@ -62,6 +64,14 @@ Repository-level guide for coding agents.
 - For Playwright SSE fixtures, normalize line endings to LF before parsing.
 - Frontend session/stream updates must be isolated by `sessionId + requestId`; do not allow cross-session stream writes.
 - Frontend persistence remains repository-driven; avoid coupling UI directly to storage implementation.
+- `ErrorBoundary` wraps `<AppContent>` at top level and each `<RichBlock>` in `StreamMessage`.
+- Stream requests use `AbortController`; app policy allows only one in-flight stream globally and requires explicit user stop (no auto-preemption on new send).
+- `useSendMessage` has a synchronous `sendingRef` mutex to prevent double-send races.
+- Stream retry: max 1 retry on network/5xx errors, only if no tokens have been received yet.
+- Stream terminal handling is single-exit + idempotent in `useSendMessage` (`finalizeStreamOnce`): first terminal signal wins among `done` / transport error / abort.
+- `useStreamController` awaits terminal callbacks (`onTransportError`, `onAborted`), and `chatApiClient.streamChat` awaits `onDone` to avoid pending-cleanup races.
+- `RichBlock` debounces MathJax typesetting by 500ms to avoid expensive re-typeset during streaming.
+- `MessageList` items (`UserMessage`, `AssistantMessage`) are `memo()`-wrapped to prevent re-renders during streaming.
 
 ## Validation
 
@@ -102,7 +112,9 @@ pnpm run build
 - Frontend components: `frontend-react/src/components/*`
 - Frontend utils: `frontend-react/src/utils/*`
 - Message list component: `frontend-react/src/components/MessageList.jsx`
-- Stream parser: `frontend-react/src/stream.js`
+- Error boundary: `frontend-react/src/components/ErrorBoundary.jsx`
+- Copy button: `frontend-react/src/components/CopyButton.jsx`
+- Stream parser: `frontend-react/src/shared/lib/sse/parseEventStream.js`
 - Backend tests: `tests/test_*.py`
 - Frontend tests: `frontend-react/src/__tests__/*`, `frontend-react/tests/*`
 - Frontend e2e spec: `frontend-react/tests/e2e/chat-stream.spec.ts`

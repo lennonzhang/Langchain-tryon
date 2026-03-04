@@ -22,6 +22,38 @@ const CAPABILITIES_RESPONSE = {
   ],
 };
 
+function mockPendingAbortableStream({ emitDoneOnAbort = false } = {}) {
+  let handlersRef = null;
+
+  streamChat.mockImplementationOnce(async (_payload, handlers, options = {}) => {
+    handlersRef = handlers;
+    await new Promise((_, reject) => {
+      const signal = options.signal;
+      if (!signal) return;
+      const abortError = () => signal.reason ?? new DOMException("Aborted", "AbortError");
+      if (signal.aborted) {
+        reject(abortError());
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => {
+          if (emitDoneOnAbort) {
+            handlers.onEvent?.({ type: "done", finish_reason: "stop" });
+            handlers.onDone?.();
+          }
+          reject(abortError());
+        },
+        { once: true },
+      );
+    });
+  });
+
+  return {
+    getHandlers: () => handlersRef,
+  };
+}
+
 describe("App behavior (session v2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -108,41 +140,129 @@ describe("App behavior (session v2)", () => {
     expect(failedMessageNode?.querySelector(".typing-dots")).toBeNull();
   });
 
-  it("isolates streams across sessions", async () => {
-    let firstHandlers;
-    streamChat
-      .mockImplementationOnce(async (_payload, handlers) => {
-        firstHandlers = handlers;
-      })
-      .mockImplementationOnce(async (_payload, handlers) => {
-        handlers.onEvent({ type: "token", content: "second-session-answer" });
-        handlers.onEvent({ type: "done" });
-        handlers.onDone?.();
-      });
+  it("blocks sending globally while another session is running", async () => {
+    const pending = mockPendingAbortableStream();
 
     render(<App />);
-    const input = await findComposerInput();
-
-    await userEvent.type(input, "session one question");
+    await userEvent.type(await findComposerInput(), "session one question");
     fireEvent.submit(document.querySelector("form.composer"));
-
-    await userEvent.click(screen.getByText("+ New Chat"));
-    const freshInput = await findComposerInput();
-    await userEvent.type(freshInput, "session two question");
-    fireEvent.submit(document.querySelector("form.composer"));
-
-    await screen.findByText("second-session-answer");
-
-    await act(async () => {
-      firstHandlers.onEvent({ type: "token", content: "first-session-answer" });
-      firstHandlers.onEvent({ type: "done" });
-      firstHandlers.onDone?.();
-    });
 
     await waitFor(() => {
-      const list = screen.getByTestId("session-list");
-      expect(list.textContent).toContain("first-session-answer");
-      expect(list.textContent).toContain("second-session-answer");
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+      expect(screen.getByText("Generating response...")).toBeInTheDocument();
     });
+
+    await userEvent.click(screen.getByText("+ New Chat"));
+    const nextInput = await findComposerInput();
+    const sendBtn = screen.getByRole("button", { name: "Send" });
+
+    expect(nextInput).toBeDisabled();
+    expect(sendBtn).toBeDisabled();
+    expect(screen.getByText("Response running in another session. Open it to stop.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(streamChat).toHaveBeenCalledTimes(1);
+
+    const sessionList = screen.getByTestId("session-list");
+    const runningSessionButton = sessionList.querySelector(".session-item");
+    expect(runningSessionButton).toBeTruthy();
+    await userEvent.click(runningSessionButton);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      pending.getHandlers()?.onEvent({ type: "token", content: "still running" });
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await screen.findByText("Ready");
+  });
+
+  it("stop keeps partial answer and unlocks next send", async () => {
+    const pending = mockPendingAbortableStream();
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "first long question");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    await waitFor(() => {
+      expect(pending.getHandlers()).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      pending.getHandlers().onEvent({ type: "token", content: "partial answer" });
+    });
+    expect(screen.getByText("partial answer")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => {
+      expect(screen.getByText("Ready")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText("Canceled by user.")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("+ New Chat"));
+    const nextInput = await findComposerInput();
+    expect(nextInput).not.toBeDisabled();
+    await userEvent.type(nextInput, "second session question");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    expect(await screen.findByText("final answer")).toBeInTheDocument();
+    expect(streamChat).toHaveBeenCalledTimes(2);
+  });
+
+  it("stop without token stores canceled by user", async () => {
+    mockPendingAbortableStream();
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "empty cancel case");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    const messageList = screen.getByTestId("messages-list");
+    expect(await within(messageList).findByText("Canceled by user.")).toBeInTheDocument();
+  });
+
+  it("done and abort race keeps first terminal outcome", async () => {
+    const pending = mockPendingAbortableStream({ emitDoneOnAbort: true });
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "race done abort");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    await waitFor(() => {
+      expect(pending.getHandlers()).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      pending.getHandlers().onEvent({ type: "token", content: "race-partial" });
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    const messageList = screen.getByTestId("messages-list");
+    expect(await within(messageList).findByText("race-partial")).toBeInTheDocument();
+    expect(within(messageList).queryByText("Canceled by user.")).toBeNull();
+  });
+
+  it("done and transport error race keeps first terminal outcome", async () => {
+    streamChat.mockImplementationOnce(async (_payload, handlers) => {
+      handlers.onEvent({ type: "token", content: "race-done-error" });
+      handlers.onDone?.();
+      throw new Error("transport boom");
+    });
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "race done transport error");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    const messageList = screen.getByTestId("messages-list");
+    expect(await within(messageList).findByText("race-done-error")).toBeInTheDocument();
+    expect(within(messageList).queryByText("Error: transport boom")).toBeNull();
   });
 });

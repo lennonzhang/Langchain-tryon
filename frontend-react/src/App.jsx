@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { useCapabilities } from "./hooks/useCapabilities";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAttachments } from "./hooks/useAttachments";
-import { useChatStream } from "./hooks/useChatStream";
 import MessageList from "./components/MessageList";
 import Composer from "./components/Composer";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { shortModelName, CONNECTED_TEXT } from "./utils/models";
-import { CHAT_V2_LAYOUT } from "./shared/lib/features";
 import { AppProviders } from "./app/AppProviders";
 import { useCapabilitiesQuery } from "./features/chat/useCapabilitiesQuery";
 import { useSessionDetailQuery, useSessionListQuery, useDeleteSessionMutation } from "./features/sessions/useSessions";
@@ -14,57 +12,6 @@ import { NEW_SESSION_KEY, useChatUiStore } from "./shared/store/chatUiStore";
 import { useSendMessage } from "./features/chat/useSendMessage";
 
 export { shortModelName };
-
-function LegacyApp() {
-  const { models, model, setModel, supportsThinking, supportsMedia } = useCapabilities();
-  const { attachments, fileInputRef, handleFilesSelected, removeAttachment, clearAttachments } =
-    useAttachments(supportsMedia);
-  const [webSearch, setWebSearch] = useState(false);
-  const [thinkingMode, setThinkingMode] = useState(true);
-  const { messages, input, setInput, isPending, onSubmit, messagesRef } = useChatStream({
-    model,
-    webSearch,
-    thinkingMode,
-    supportsThinking,
-    supportsMedia,
-    attachments,
-    clearAttachments,
-  });
-
-  return (
-    <div className={`wrap ${isPending ? "is-pending" : ""}`}>
-      <div className="chat">
-        <header className="header">
-          <div className="header-main">
-            <div className="header-kicker">LangChain + NVIDIA</div>
-            <h1>Streaming Chat Studio</h1>
-            <p>Web Search, Thinking &amp; streaming Reasoning.</p>
-          </div>
-        </header>
-        <MessageList messages={messages} isPending={isPending} ref={messagesRef} />
-        <Composer
-          models={models}
-          model={model}
-          onModelChange={setModel}
-          webSearch={webSearch}
-          onWebSearchChange={setWebSearch}
-          supportsThinking={supportsThinking}
-          thinkingMode={thinkingMode}
-          onThinkingModeChange={setThinkingMode}
-          supportsMedia={supportsMedia}
-          attachments={attachments}
-          fileInputRef={fileInputRef}
-          onRemoveAttachment={removeAttachment}
-          onFilesSelected={handleFilesSelected}
-          input={input}
-          onInputChange={setInput}
-          isPending={isPending}
-          onSubmit={onSubmit}
-        />
-      </div>
-    </div>
-  );
-}
 
 function AppContent() {
   const autoScrollThresholdPx = 150;
@@ -87,7 +34,7 @@ function AppContent() {
   const draftsBySessionId = useChatUiStore((state) => state.draftsBySessionId);
   const pendingBySessionId = useChatUiStore((state) => state.pendingBySessionId);
   const requestIdBySessionId = useChatUiStore((state) => state.requestIdBySessionId);
-  const setSidebarOpen = useChatUiStore((state) => state.setSidebarOpen);
+  const toggleSidebar = useChatUiStore((state) => state.toggleSidebar);
   const setFilter = useChatUiStore((state) => state.setFilter);
   const setActiveSessionId = useChatUiStore((state) => state.setActiveSessionId);
   const setDraft = useChatUiStore((state) => state.setDraft);
@@ -110,7 +57,7 @@ function AppContent() {
 
   const deleteSessionMutation = useDeleteSessionMutation();
 
-  const onSubmit = useSendMessage({
+  const { onSubmit, stopActiveSession } = useSendMessage({
     model,
     webSearch,
     thinkingMode,
@@ -122,19 +69,36 @@ function AppContent() {
 
   const activeKey = activeSessionId || NEW_SESSION_KEY;
   const input = draftsBySessionId[activeKey] || "";
-  const isPending = activeSessionId && activeSessionId !== NEW_SESSION_KEY ? Boolean(pendingBySessionId[activeSessionId]) : false;
+  const runningSessionId =
+    Object.entries(pendingBySessionId).find(([, pending]) => Boolean(pending))?.[0] || null;
+  const isGlobalPending = Boolean(runningSessionId);
+  const isActiveRunningSession =
+    Boolean(activeSessionId) &&
+    activeSessionId !== NEW_SESSION_KEY &&
+    activeSessionId === runningSessionId;
+  const isPending = isActiveRunningSession;
   const currentRequestId =
     activeSessionId && activeSessionId !== NEW_SESSION_KEY ? requestIdBySessionId[activeSessionId] || null : null;
   const messages = activeSession?.messages?.length
     ? activeSession.messages
     : [{ id: "connected", role: "assistant", content: CONNECTED_TEXT }];
 
-  function handleMessagesScroll(event) {
+  const handleMessagesScroll = useCallback((event) => {
     const el = event?.currentTarget || messagesRef.current;
     if (!el) return;
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottomRef.current = distanceToBottom <= autoScrollThresholdPx;
-  }
+  }, []);
+
+  const handleToggleSidebar = useCallback(() => toggleSidebar(), [toggleSidebar]);
+  const handleCreateNew = useCallback(() => setActiveSessionId(NEW_SESSION_KEY), [setActiveSessionId]);
+  const handleSelectSession = useCallback((id) => setActiveSessionId(id), [setActiveSessionId]);
+  const handleDeleteSession = useCallback(async (sessionId) => {
+    await deleteSessionMutation.mutateAsync(sessionId);
+    if (useChatUiStore.getState().activeSessionId === sessionId) {
+      setActiveSessionId(null);
+    }
+  }, [deleteSessionMutation, setActiveSessionId]);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -146,22 +110,18 @@ function AppContent() {
   }, [messages]);
 
   return (
-    <div className={`app-shell ${isPending ? "is-pending" : ""}`}>
+    <div className={`app-shell ${isGlobalPending ? "is-pending" : ""}`}>
       <SessionSidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
+        runningSessionId={runningSessionId}
         filter={filter}
         isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        onToggle={handleToggleSidebar}
         onFilterChange={setFilter}
-        onCreateNew={() => setActiveSessionId(NEW_SESSION_KEY)}
-        onSelect={(sessionId) => setActiveSessionId(sessionId)}
-        onDelete={async (sessionId) => {
-          await deleteSessionMutation.mutateAsync(sessionId);
-          if (activeSessionId === sessionId) {
-            setActiveSessionId(null);
-          }
-        }}
+        onCreateNew={handleCreateNew}
+        onSelect={handleSelectSession}
+        onDelete={handleDeleteSession}
       />
 
       <div className="chat">
@@ -179,8 +139,19 @@ function AppContent() {
         </header>
 
         <div className="status-bar">
-          <span className={`status-dot ${isPending ? "busy" : ""}`} />
-          <span>{isPending ? "Generating response..." : "Ready"}</span>
+          <span className={`status-dot ${isGlobalPending ? "busy" : ""}`} />
+          <span>
+            {!isGlobalPending
+              ? "Ready"
+              : isActiveRunningSession
+                ? "Generating response..."
+                : "Response running in another session. Open it to stop."}
+          </span>
+          {isActiveRunningSession && (
+            <button type="button" className="status-stop" onClick={stopActiveSession}>
+              Stop
+            </button>
+          )}
         </div>
 
         <MessageList
@@ -189,6 +160,7 @@ function AppContent() {
           currentRequestId={currentRequestId}
           ref={messagesRef}
           onScroll={handleMessagesScroll}
+          loading={activeSessionQuery.isLoading}
         />
 
         <Composer
@@ -207,7 +179,7 @@ function AppContent() {
           onFilesSelected={handleFilesSelected}
           input={input}
           onInputChange={(value) => setDraft(activeSessionId, value)}
-          isPending={isPending}
+          isPending={isGlobalPending}
           onSubmit={onSubmit}
         />
       </div>
@@ -216,13 +188,11 @@ function AppContent() {
 }
 
 export default function App() {
-  if (!CHAT_V2_LAYOUT) {
-    return <LegacyApp />;
-  }
-
   return (
     <AppProviders>
-      <AppContent />
+      <ErrorBoundary>
+        <AppContent />
+      </ErrorBoundary>
     </AppProviders>
   );
 }

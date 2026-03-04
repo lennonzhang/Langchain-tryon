@@ -1,4 +1,5 @@
-import { parseEventStream } from "../stream";
+import { describe, it, expect } from "vitest";
+import { parseEventStream } from "../shared/lib/sse/parseEventStream";
 
 class FakeReader {
   constructor(chunks) {

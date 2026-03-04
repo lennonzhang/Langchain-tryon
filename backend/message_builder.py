@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from .model_registry import get_context_window, supports
 
+_MAX_MEDIA_ITEMS = 5
+_MAX_HISTORY_ITEMS = 20
+_MAX_URL_DISPLAY_CHARS = 256
+_CHARS_PER_TOKEN = 4
+_OVERHEAD_TOKENS_PER_MSG = 4
+
 
 def normalize_media_data_urls(media) -> list[str]:
     """
@@ -17,7 +23,7 @@ def normalize_media_data_urls(media) -> list[str]:
         return []
 
     normalized = []
-    for item in media[:5]:
+    for item in media[:_MAX_MEDIA_ITEMS]:
         if not isinstance(item, str):
             continue
         value = item.strip()
@@ -61,7 +67,7 @@ def build_messages(
         system_parts.append(search_context)
 
     if isinstance(history, list):
-        for item in history[-20:]:
+        for item in history[-_MAX_HISTORY_ITEMS:]:
             if not isinstance(item, dict):
                 continue
             role = item.get("role")
@@ -121,13 +127,13 @@ def estimate_tokens_from_messages(messages: list[dict[str, str]]) -> int:
                         total_chars += len(text)
                     image_url = (part.get("image_url") or {}).get("url")
                     if isinstance(image_url, str):
-                        total_chars += min(len(image_url), 256)
+                        total_chars += min(len(image_url), _MAX_URL_DISPLAY_CHARS)
                     video_url = (part.get("video_url") or {}).get("url")
                     if isinstance(video_url, str):
-                        total_chars += min(len(video_url), 256)
+                        total_chars += min(len(video_url), _MAX_URL_DISPLAY_CHARS)
             count += 1
 
-    return max(1, total_chars // 4 + count * 4)
+    return max(1, total_chars // _CHARS_PER_TOKEN + count * _OVERHEAD_TOKENS_PER_MSG)
 
 
 def context_usage_payload(model: str, phase: str, messages: list[dict[str, str]]) -> dict:
@@ -144,7 +150,7 @@ def context_usage_payload(model: str, phase: str, messages: list[dict[str, str]]
 
 
 def history_as_messages(history: list) -> list:
-    """Convert frontend history dicts to LangChain Message objects (last 20)."""
+    """Convert frontend history dicts to LangChain Message objects."""
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
     _ROLE_MAP = {"user": HumanMessage, "assistant": AIMessage, "system": SystemMessage}
@@ -153,7 +159,7 @@ def history_as_messages(history: list) -> list:
         return []
 
     messages = []
-    for item in history[-20:]:
+    for item in history[-_MAX_HISTORY_ITEMS:]:
         if not isinstance(item, dict):
             continue
         role = item.get("role")
@@ -169,7 +175,7 @@ def history_as_text(history: list) -> str:
         return ""
 
     lines = []
-    for item in history[-20:]:
+    for item in history[-_MAX_HISTORY_ITEMS:]:
         if not isinstance(item, dict):
             continue
         role = item.get("role")

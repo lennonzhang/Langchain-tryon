@@ -5,6 +5,7 @@ from urllib import error as urlerror
 from unittest.mock import patch
 
 from backend.chat_handlers import handle_chat_once, handle_chat_stream
+from backend.http_utils import PayloadTooLargeError
 
 
 class TestChatHandlers(unittest.TestCase):
@@ -315,6 +316,32 @@ class TestChatHandlers(unittest.TestCase):
         self.assertIn("provider=openai", payload["detail"])
         self.assertIn("protocol=openai_responses", payload["detail"])
         self.assertIn("type=invalid_request_error", payload["detail"])
+
+    def test_handle_chat_once_payload_too_large_returns_413(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                side_effect=PayloadTooLargeError("too big"),
+            ),
+            patch("backend.chat_handlers.send_json") as send_json_mock,
+        ):
+            handle_chat_once(handler, "api-key")
+
+        send_json_mock.assert_called_once_with(handler, 413, {"error": "Payload too large"})
+
+    def test_handle_chat_stream_payload_too_large_returns_413(self):
+        handler = object()
+        with (
+            patch(
+                "backend.chat_handlers.read_json_body",
+                side_effect=PayloadTooLargeError("too big"),
+            ),
+            patch("backend.chat_handlers.send_json") as send_json_mock,
+        ):
+            handle_chat_stream(handler, "api-key")
+
+        send_json_mock.assert_called_once_with(handler, 413, {"error": "Payload too large"})
 
     def test_handle_chat_stream_debug_disabled_does_not_log(self):
         handler = object()

@@ -69,7 +69,7 @@ def proxy_env_guard():
                 os.environ[key] = value
 
 
-def _build_nvidia_chat_model(api_key: str, upstream_model: str, model: str, thinking_mode: bool):
+def _build_nvidia_chat_model(api_key: str, upstream_model: str, model: str, thinking_mode: bool, pcfg: dict):
     try:
         from langchain_nvidia_ai_endpoints import ChatNVIDIA
     except ImportError as exc:
@@ -78,7 +78,6 @@ def _build_nvidia_chat_model(api_key: str, upstream_model: str, model: str, thin
         ) from exc
 
     timeout_seconds = float_env("NVIDIA_TIMEOUT_SECONDS", 300.0, 30.0)
-    pcfg = get_params(model)
 
     if thinking_mode:
         temperature = pcfg.get("temperature_thinking", 1.0)
@@ -149,6 +148,7 @@ def build_chat_model(
             upstream_model=upstream_model,
             model=model,
             thinking_mode=thinking_mode,
+            pcfg=pcfg,
         )
     if provider_key == "anthropic":
         return ProxyGatewayChatModel(

@@ -1,10 +1,10 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { shortModelName } from "../../utils/models";
 import { nextId, nextRequestId } from "../../shared/lib/id";
 import { useSessionRepository } from "../sessions/sessionRepositoryContext";
 import { SESSION_LIST_QUERY_KEY, sessionDetailQueryKey } from "../sessions/useSessions";
-import { useChatUiStore } from "../../shared/store/chatUiStore";
+import { NEW_SESSION_KEY, useChatUiStore } from "../../shared/store/chatUiStore";
 import { buildSessionTitle } from "../../entities/session/sessionSummary";
 import { toApiHistory } from "./history";
 import { useStreamController } from "./useStreamController";
@@ -28,6 +28,10 @@ function patchStreamMessageInCache(queryClient, sessionId, streamId, event) {
   });
 }
 
+function hasGlobalPending(pendingBySessionId) {
+  return Object.values(pendingBySessionId || {}).some(Boolean);
+}
+
 export function useSendMessage({
   model,
   webSearch,
@@ -39,114 +43,128 @@ export function useSendMessage({
 }) {
   const repository = useSessionRepository();
   const queryClient = useQueryClient();
-  const { startStream } = useStreamController();
+  const { startStream, abortStream } = useStreamController();
+  const sendingRef = useRef(false);
 
-  return useCallback(
+  const onSubmit = useCallback(
     async (event) => {
       event.preventDefault();
 
-      const state = useChatUiStore.getState();
-      const currentSessionId = state.activeSessionId;
-      const input = state.getDraft(currentSessionId);
-      const text = input.trim();
+      // Synchronous mutex, prevents race between state reads and startRequest.
+      if (sendingRef.current) return;
+      sendingRef.current = true;
 
-      if (!text) {
-        return;
-      }
+      try {
+        const state = useChatUiStore.getState();
+        const currentSessionId = state.activeSessionId;
+        const input = state.getDraft(currentSessionId);
+        const text = input.trim();
 
-      const effectiveThinking = supportsThinking ? thinkingMode : true;
-      const mediaUrls = supportsMedia ? attachments.map((item) => item.dataUrl) : [];
+        if (!text) {
+          return;
+        }
+        if (hasGlobalPending(state.pendingBySessionId)) {
+          return;
+        }
 
-      let sessionId = currentSessionId;
-      let session = null;
+        const effectiveThinking = supportsThinking ? thinkingMode : true;
+        const mediaUrls = supportsMedia ? attachments.map((item) => item.dataUrl) : [];
 
-      if (sessionId) {
-        session = await repository.getSession(sessionId);
-      }
+        let sessionId = currentSessionId;
+        let session = null;
 
-      if (!session) {
-        sessionId = nextId("session");
-        session = await repository.createSession({
-          id: sessionId,
-          title: buildSessionTitle(text),
-          settings: {
-            model,
-            webSearch,
-            thinkingMode: effectiveThinking,
-          },
-        });
-        useChatUiStore.getState().setActiveSessionId(sessionId);
-      }
+        if (sessionId) {
+          session = await repository.getSession(sessionId);
+        }
 
-      const pendingBySession = useChatUiStore.getState().pendingBySessionId;
-      if (pendingBySession[sessionId]) {
-        return;
-      }
+        if (!session) {
+          sessionId = nextId("session");
+          session = await repository.createSession({
+            id: sessionId,
+            title: buildSessionTitle(text),
+            settings: {
+              model,
+              webSearch,
+              thinkingMode: effectiveThinking,
+            },
+          });
+          useChatUiStore.getState().setActiveSessionId(sessionId);
+        }
 
-      const requestId = nextRequestId();
-      const userId = nextId("msg");
-      const streamId = nextId("msg");
-      const tags = [shortModelName(model)];
-      if (webSearch) tags.push("Search");
-      if (supportsThinking) tags.push(effectiveThinking ? "Thinking" : "Instant");
-      if (mediaUrls.length > 0) tags.push(`Media x${mediaUrls.length}`);
+        // Single global in-flight stream policy.
+        if (hasGlobalPending(useChatUiStore.getState().pendingBySessionId)) {
+          return;
+        }
 
-      const userMessage = { id: userId, role: "user", content: `[${tags.join("] [")}]\n${text}` };
-      const streamMessage = {
-        id: streamId,
-        requestId,
-        role: "assistant_stream",
-        status: "streaming",
-        search: { state: "hidden", query: "", results: [], error: "" },
-        usageLines: [],
-        reasoning: "",
-        answer: "Thinking...",
-      };
+        const requestId = nextRequestId();
+        const userId = nextId("msg");
+        const streamId = nextId("msg");
+        const tags = [shortModelName(model)];
+        if (webSearch) tags.push("Search");
+        if (supportsThinking) tags.push(effectiveThinking ? "Thinking" : "Instant");
+        if (mediaUrls.length > 0) tags.push(`Media x${mediaUrls.length}`);
 
-      await repository.appendMessages(sessionId, [userMessage, streamMessage]);
-      await syncSessionToCache(queryClient, repository, sessionId);
+        const userMessage = { id: userId, role: "user", content: `[${tags.join("] [")}]\n${text}` };
+        const streamMessage = {
+          id: streamId,
+          requestId,
+          role: "assistant_stream",
+          status: "streaming",
+          search: { state: "hidden", query: "", results: [], error: "" },
+          usageLines: [],
+          reasoning: "",
+          answer: "Thinking...",
+        };
 
-      useChatUiStore.getState().setDraft(sessionId, "");
-      clearAttachments();
-      useChatUiStore.getState().startRequest(sessionId, requestId);
+        await repository.appendMessages(sessionId, [userMessage, streamMessage]);
+        await syncSessionToCache(queryClient, repository, sessionId);
 
-      const history = toApiHistory(session.messages);
+        useChatUiStore.getState().setDraft(sessionId, "");
+        clearAttachments();
+        useChatUiStore.getState().startRequest(sessionId, requestId);
 
-      await startStream({
-        payload: {
-          request_id: requestId,
-          message: text,
-          history,
-          model,
-          web_search: webSearch,
-          thinking_mode: effectiveThinking,
-          images: mediaUrls,
-        },
-        onEvent: async (streamEvent) => {
-          const active = useChatUiStore.getState().isCurrentRequest(sessionId, requestId);
-          if (!active) {
-            return;
-          }
+        const history = toApiHistory(session.messages);
+        let finalized = false;
+        let terminalErrorText = "";
 
-          await repository.updateMessage(sessionId, streamId, (message) => mapStreamEventToPatch(message, streamEvent));
+        const finalizeStreamOnce = async (cause, payload = {}) => {
+          if (finalized) return;
+          finalized = true;
 
-          if (streamEvent.type === "done") {
-            const updated = await syncSessionToCache(queryClient, repository, sessionId);
-            const streamEntry = updated?.messages?.find((msg) => msg.id === streamId);
-            const failed = streamEntry?.status === "failed";
-            if (failed) {
-              useChatUiStore.getState().failRequest(sessionId, streamEntry.answer || "Request failed");
-            } else {
-              useChatUiStore.getState().finishRequest(sessionId);
-            }
-          } else {
-            patchStreamMessageInCache(queryClient, sessionId, streamId, streamEvent);
-          }
-        },
-        onDone: async () => {
           if (!useChatUiStore.getState().isCurrentRequest(sessionId, requestId)) {
             return;
           }
+
+          const errorText = payload.errorText || terminalErrorText;
+          if (cause === "error" || (cause === "done" && errorText)) {
+            const finalErrorText = errorText || "Request failed";
+            await repository.updateMessage(sessionId, streamId, (message) => {
+              if (message.status !== "streaming") return message;
+              return {
+                ...message,
+                status: "failed",
+                answer: `Error: ${finalErrorText}`,
+              };
+            });
+            await syncSessionToCache(queryClient, repository, sessionId);
+            useChatUiStore.getState().failRequest(sessionId, finalErrorText);
+            return;
+          }
+
+          if (cause === "aborted") {
+            await repository.updateMessage(sessionId, streamId, (msg) => {
+              if (msg.status !== "streaming") return msg;
+              const answer =
+                msg.answer && msg.answer !== "Thinking..."
+                  ? msg.answer
+                  : "Canceled by user.";
+              return { ...msg, status: "done", answer };
+            });
+            await syncSessionToCache(queryClient, repository, sessionId);
+            useChatUiStore.getState().finishRequest(sessionId);
+            return;
+          }
+
           await repository.updateMessage(sessionId, streamId, (msg) => {
             if (msg.status !== "streaming") return msg;
             const answer = !msg.answer || msg.answer === "Thinking..." ? "(empty response)" : msg.answer;
@@ -154,20 +172,48 @@ export function useSendMessage({
           });
           await syncSessionToCache(queryClient, repository, sessionId);
           useChatUiStore.getState().finishRequest(sessionId);
-        },
-        onTransportError: async (errorText) => {
-          if (!useChatUiStore.getState().isCurrentRequest(sessionId, requestId)) {
-            return;
-          }
-          await repository.updateMessage(sessionId, streamId, (message) => ({
-            ...message,
-            status: "failed",
-            answer: `Error: ${errorText}`,
-          }));
-          await syncSessionToCache(queryClient, repository, sessionId);
-          useChatUiStore.getState().failRequest(sessionId, errorText);
-        },
-      });
+        };
+
+        await startStream({
+          payload: {
+            request_id: requestId,
+            message: text,
+            history,
+            model,
+            web_search: webSearch,
+            thinking_mode: effectiveThinking,
+            images: mediaUrls,
+          },
+          onEvent: async (streamEvent) => {
+            const active = useChatUiStore.getState().isCurrentRequest(sessionId, requestId);
+            if (!active) {
+              return;
+            }
+
+            if (streamEvent.type === "error") {
+              terminalErrorText = streamEvent.error || "Streaming request failed";
+              return;
+            }
+            if (streamEvent.type === "done") {
+              return;
+            }
+
+            await repository.updateMessage(sessionId, streamId, (message) => mapStreamEventToPatch(message, streamEvent));
+            patchStreamMessageInCache(queryClient, sessionId, streamId, streamEvent);
+          },
+          onDone: async () => {
+            await finalizeStreamOnce("done");
+          },
+          onTransportError: async (errorText) => {
+            await finalizeStreamOnce("error", { errorText });
+          },
+          onAborted: async () => {
+            await finalizeStreamOnce("aborted");
+          },
+        });
+      } finally {
+        sendingRef.current = false;
+      }
     },
     [
       attachments,
@@ -182,4 +228,14 @@ export function useSendMessage({
       webSearch,
     ],
   );
+
+  const stopActiveSession = useCallback(() => {
+    const state = useChatUiStore.getState();
+    const activeSessionId = state.activeSessionId;
+    if (!activeSessionId || activeSessionId === NEW_SESSION_KEY) return;
+    if (!state.pendingBySessionId[activeSessionId]) return;
+    abortStream();
+  }, [abortStream]);
+
+  return { onSubmit, stopActiveSession };
 }

@@ -140,11 +140,11 @@ _REGISTRY: list[dict] = [
         },
     },
     {
-        "id": "google/gemini-3-flash-preview",
-        "label": "Gemini 3 Flash Preview",
+        "id": "google/gemini-3-pro-preview",
+        "label": "Gemini 3 Pro Preview",
         "default": False,
         "provider": "google",
-        "upstream_model": "gemini-3-flash-preview",
+        "upstream_model": "gemini-3-pro-preview",
         "protocol": "google_generate_content",
         "capabilities": {
             "thinking": True,
@@ -157,7 +157,7 @@ _REGISTRY: list[dict] = [
             "top_p": 1.0,
             "thinking_control": "none",
         },
-        "context_window": 1000000,
+        "context_window": 1048576,
         "agent_config": {
             "max_steps": 8,
             "tools": ["web_search", "read_url", "python_exec"],
@@ -166,6 +166,10 @@ _REGISTRY: list[dict] = [
         },
     },
 ]
+
+# ── index for O(1) lookup ────────────────────────────────────────
+
+_INDEX: dict[str, dict] = {m["id"]: m for m in _REGISTRY}
 
 # ── public helpers ───────────────────────────────────────────────
 
@@ -176,10 +180,7 @@ def get_all() -> list[dict]:
 
 def get_by_id(model_id: str) -> dict | None:
     """Look up a model descriptor by its exact ``id`` string."""
-    for m in _REGISTRY:
-        if m["id"] == model_id:
-            return m
-    return None
+    return _INDEX.get(model_id)
 
 
 def get_default() -> dict:

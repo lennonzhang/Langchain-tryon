@@ -1,8 +1,17 @@
 import { memo } from "react";
 import CollapsibleSection from "./CollapsibleSection";
 import RichBlock from "./RichBlock";
+import ErrorBoundary from "./ErrorBoundary";
+import CopyButton from "./CopyButton";
+
+const richBlockFallback = (
+  <div className="assistant-body" style={{ color: "var(--error, #c00)", fontStyle: "italic" }}>
+    Failed to render content.
+  </div>
+);
 
 function StreamMessage({ msg, showTyping }) {
+  const isStreaming = msg.status === "streaming";
   return (
     <div className={`msg assistant stream${msg.status === "done" ? " stream-done" : ""}`}>
       {msg.search.state !== "hidden" && (
@@ -53,14 +62,21 @@ function StreamMessage({ msg, showTyping }) {
       {msg.reasoning && (
         <CollapsibleSection title="Reasoning" className="reasoning" defaultOpen={true}>
           <div data-testid="reasoning-panel">
-            <RichBlock className="assistant-body" text={msg.reasoning} />
+            <ErrorBoundary key={`${msg.id}-reasoning`} fallback={richBlockFallback}>
+              <RichBlock className="assistant-body" text={msg.reasoning} streaming={isStreaming} />
+            </ErrorBoundary>
           </div>
         </CollapsibleSection>
       )}
 
       <div className="assistant-section answer">
-        <div className="assistant-title">Answer</div>
-        <RichBlock className="assistant-body" text={msg.answer} />
+        <div className="assistant-title">
+          Answer
+          {!isStreaming && msg.answer && <CopyButton text={msg.answer} />}
+        </div>
+        <ErrorBoundary key={`${msg.id}-answer`} fallback={richBlockFallback}>
+          <RichBlock className="assistant-body" text={msg.answer} streaming={isStreaming} />
+        </ErrorBoundary>
         {showTyping && (
           <span className="typing-dots" aria-label="Typing">
             <span className="dot" />

@@ -49,8 +49,6 @@ def _is_agentic_model(model: str) -> bool:
 
 
 def _should_use_agentic_flow(model: str, agent_mode: bool | None) -> bool:
-    if agent_mode is True:
-        return _is_agentic_model(model)
     if agent_mode is False:
         return False
     return _is_agentic_model(model)

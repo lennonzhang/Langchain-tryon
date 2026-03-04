@@ -59,7 +59,7 @@ def normalize_upstream_error(
         upstream_error_type=err_type,
         message=message,
         request_id=request_id,
-        raw_body=raw_body,
+        raw_body=raw_body[:5000],
     )
 
 

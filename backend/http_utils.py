@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+_MAX_JSON_BODY = 10 * 1024 * 1024  # 10 MB
+
+
+class PayloadTooLargeError(ValueError):
+    """Raised when the request body exceeds ``_MAX_JSON_BODY``."""
 
 
 def send_json(handler, status: int, payload: dict) -> None:
@@ -15,7 +24,16 @@ def send_json(handler, status: int, payload: dict) -> None:
 
 
 def read_json_body(handler) -> dict:
-    content_length = int(handler.headers.get("Content-Length", "0"))
+    try:
+        content_length = int(handler.headers.get("Content-Length", "0"))
+    except (ValueError, TypeError):
+        content_length = 0
+    if content_length < 0:
+        content_length = 0
+    if content_length > _MAX_JSON_BODY:
+        raise PayloadTooLargeError(
+            f"Payload too large ({content_length} bytes, max {_MAX_JSON_BODY})"
+        )
     raw = handler.rfile.read(content_length)
     return json.loads(raw.decode("utf-8"))
 
@@ -46,7 +64,9 @@ def serve_static(handler, frontend_dir: Path, rel_path: str) -> None:
 
     try:
         target = target.resolve()
-        if not str(target).startswith(str(frontend_dir.resolve())):
+        try:
+            target.relative_to(frontend_dir.resolve())
+        except ValueError:
             send_json(handler, 403, {"error": "Forbidden"})
             return
         if not target.exists() or not target.is_file():
@@ -60,6 +80,7 @@ def serve_static(handler, frontend_dir: Path, rel_path: str) -> None:
         handler.send_header("Content-Length", str(len(body)))
         handler.end_headers()
         handler.wfile.write(body)
-    except Exception as exc:  # noqa: BLE001
-        send_json(handler, 500, {"error": "Failed to serve file", "detail": str(exc)})
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to serve static file: %s", rel_path)
+        send_json(handler, 500, {"error": "Failed to serve file"})
 

@@ -72,7 +72,7 @@ Open `http://127.0.0.1:8000`.
   - NVIDIA: `moonshotai/kimi-k2.5`, `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
   - Anthropic: `anthropic/claude-sonnet-4-6` (via sssaicode proxy)
   - OpenAI: `openai/gpt-5.3-codex` (default, via sssaicode proxy)
-  - Google: `google/gemini-3-flash-preview` (via sssaicode proxy)
+  - Google: `google/gemini-3-pro-preview` (via sssaicode proxy)
 - Agent mode defaults:
   - on: qwen, glm, claude, codex, gemini (if `agent_mode` omitted)
   - off: kimi (if `agent_mode` omitted)
@@ -153,7 +153,7 @@ Frontend:
 - `frontend-react/src/App.jsx` (composition root)
 - `frontend-react/src/hooks/*`
 - `frontend-react/src/components/*`
-- `frontend-react/src/stream.js`
+- `frontend-react/src/shared/lib/sse/parseEventStream.js`
 - `frontend-react/src/utils/*`
 - `frontend-react/src/app/AppProviders.jsx` (query + repository provider)
 - `frontend-react/src/features/sessions/*` (session list, repository hooks)
@@ -181,5 +181,7 @@ Deployment:
 
 - Session history is now a first-class frontend concept with title/time/preview list rendering.
 - Streaming updates are isolated by `sessionId + requestId` to prevent cross-session bleed.
+- Frontend stream policy is global single in-flight request; new sends do not auto-abort running streams.
+- User must explicitly stop the running session to unlock new sends; terminal handling is idempotent (first terminal signal wins).
 - SSE parser is CRLF/LF tolerant.
 - Current persistence default is in-memory repository (`MemorySessionRepository`), with pluggable repository interface for IndexedDB or backend sync later.

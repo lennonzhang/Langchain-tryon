@@ -1,6 +1,6 @@
 import unittest
 
-from backend.schemas import ChatRequest
+from backend.schemas import ChatRequest, ValidationError
 
 
 class TestChatRequestFromDict(unittest.TestCase):
@@ -108,6 +108,50 @@ class TestChatRequestFromDict(unittest.TestCase):
         req = ChatRequest.from_dict({"request_id": 123})
         self.assertIsInstance(req.request_id, str)
         self.assertTrue(len(req.request_id) > 0)
+
+
+    def test_message_too_long_raises_validation_error(self):
+        data = {"message": "x" * 100_001}
+        with self.assertRaises(ValidationError) as ctx:
+            ChatRequest.from_dict(data)
+        self.assertIn("message", str(ctx.exception))
+
+    def test_message_at_limit_accepted(self):
+        data = {"message": "x" * 100_000}
+        req = ChatRequest.from_dict(data)
+        self.assertEqual(len(req.message), 100_000)
+
+    def test_history_malformed_items_filtered_out(self):
+        data = {
+            "message": "hi",
+            "history": [
+                {"role": "user", "content": "valid"},
+                {"invalid": "no role"},
+                "not a dict",
+                {"role": 123, "content": "bad role type"},
+                {"role": "user", "content": 456},
+                {"role": "assistant", "content": "also valid"},
+            ],
+        }
+        req = ChatRequest.from_dict(data)
+        self.assertEqual(len(req.history), 2)
+        self.assertEqual(req.history[0]["content"], "valid")
+        self.assertEqual(req.history[1]["content"], "also valid")
+
+    def test_history_capped_at_100(self):
+        items = [{"role": "user", "content": f"msg {i}"} for i in range(200)]
+        req = ChatRequest.from_dict({"message": "hi", "history": items})
+        self.assertLessEqual(len(req.history), 100)
+
+    def test_images_non_string_items_filtered(self):
+        data = {"message": "hi", "images": ["valid.png", 123, None, "also_valid.jpg"]}
+        req = ChatRequest.from_dict(data)
+        self.assertEqual(req.images, ["valid.png", "also_valid.jpg"])
+
+    def test_images_capped_at_10(self):
+        data = {"message": "hi", "images": [f"img_{i}" for i in range(20)]}
+        req = ChatRequest.from_dict(data)
+        self.assertEqual(len(req.images), 10)
 
 
 if __name__ == "__main__":

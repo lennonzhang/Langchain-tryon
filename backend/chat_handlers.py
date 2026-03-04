@@ -5,10 +5,10 @@ import logging
 from urllib import error
 
 from .config import resolve_model
-from .http_utils import init_sse, read_json_body, send_json, send_sse_event
+from .http_utils import PayloadTooLargeError, init_sse, read_json_body, send_json, send_sse_event
 from .nvidia_client import chat_once, stream_chat
 from .provider_event_normalizer import normalize_upstream_error, normalized_error_detail
-from .schemas import ChatRequest
+from .schemas import ChatRequest, ValidationError
 
 logger = logging.getLogger(__name__)
 _PREVIEW_LIMIT = 80
@@ -82,11 +82,18 @@ def _debug_log_stream_event(enabled: bool, rid: str, model: str, event: dict) ->
 def handle_chat_once(handler, api_key: str, debug_stream: bool = False) -> None:
     try:
         data = read_json_body(handler)
+    except PayloadTooLargeError:
+        send_json(handler, 413, {"error": "Payload too large"})
+        return
     except (ValueError, json.JSONDecodeError):
         send_json(handler, 400, {"error": "Invalid JSON body"})
         return
 
-    req = ChatRequest.from_dict(data)
+    try:
+        req = ChatRequest.from_dict(data)
+    except ValidationError as ve:
+        send_json(handler, 400, {"error": str(ve)})
+        return
     if not req.message:
         send_json(handler, 400, {"error": "message is required"})
         return
@@ -188,11 +195,18 @@ def handle_chat_once(handler, api_key: str, debug_stream: bool = False) -> None:
 def handle_chat_stream(handler, api_key: str, debug_stream: bool = False) -> None:
     try:
         data = read_json_body(handler)
+    except PayloadTooLargeError:
+        send_json(handler, 413, {"error": "Payload too large"})
+        return
     except (ValueError, json.JSONDecodeError):
         send_json(handler, 400, {"error": "Invalid JSON body"})
         return
 
-    req = ChatRequest.from_dict(data)
+    try:
+        req = ChatRequest.from_dict(data)
+    except ValidationError as ve:
+        send_json(handler, 400, {"error": str(ve)})
+        return
     if not req.message:
         send_json(handler, 400, {"error": "message is required"})
         return

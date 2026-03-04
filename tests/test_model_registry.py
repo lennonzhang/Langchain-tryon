@@ -36,7 +36,7 @@ class TestModelRegistry(unittest.TestCase):
         self.assertIn("z-ai/glm5", ids)
         self.assertIn("anthropic/claude-sonnet-4-6", ids)
         self.assertIn("openai/gpt-5.3-codex", ids)
-        self.assertIn("google/gemini-3-flash-preview", ids)
+        self.assertIn("google/gemini-3-pro-preview", ids)
 
     # ── get_by_id ────────────────────────────────────────────────
 
@@ -75,6 +75,11 @@ class TestModelRegistry(unittest.TestCase):
         self.assertTrue(supports("z-ai/glm5", "thinking"))
         self.assertFalse(supports("z-ai/glm5", "media"))
         self.assertTrue(supports("z-ai/glm5", "agent"))
+
+    def test_gemini_3_pro_capabilities(self):
+        self.assertTrue(supports("google/gemini-3-pro-preview", "thinking"))
+        self.assertFalse(supports("google/gemini-3-pro-preview", "media"))
+        self.assertTrue(supports("google/gemini-3-pro-preview", "agent"))
 
     def test_unknown_model_supports_nothing(self):
         self.assertFalse(supports("unknown/model", "thinking"))
@@ -126,7 +131,13 @@ class TestModelRegistry(unittest.TestCase):
         self.assertEqual(get_provider("moonshotai/kimi-k2.5"), "nvidia")
         self.assertEqual(get_provider("openai/gpt-5.3-codex"), "openai")
         self.assertEqual(get_upstream_model("anthropic/claude-sonnet-4-6"), "claude-sonnet-4-6")
-        self.assertEqual(get_protocol("google/gemini-3-flash-preview"), "google_generate_content")
+        self.assertEqual(get_protocol("google/gemini-3-pro-preview"), "google_generate_content")
+
+    def test_gemini_3_pro_metadata(self):
+        self.assertEqual(get_provider("google/gemini-3-pro-preview"), "google")
+        self.assertEqual(get_upstream_model("google/gemini-3-pro-preview"), "gemini-3-pro-preview")
+        self.assertEqual(get_protocol("google/gemini-3-pro-preview"), "google_generate_content")
+        self.assertEqual(get_context_window("google/gemini-3-pro-preview"), 1048576)
 
     # ── capabilities_response ────────────────────────────────────
 

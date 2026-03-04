@@ -8,11 +8,12 @@ export async function fetchCapabilities() {
   return resp.json();
 }
 
-export async function streamChat(payload, handlers) {
+export async function streamChat(payload, handlers, { signal } = {}) {
   const resp = await fetch("/api/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
 
   if (!resp.ok) {
@@ -20,10 +21,10 @@ export async function streamChat(payload, handlers) {
     try {
       const body = await resp.json();
       detail = body.error || detail;
-    } catch {
-      // no-op
+    } catch (e) {
+      if (e?.name === "AbortError") throw e;
     }
-    throw new Error(detail);
+    throw new Error(`${resp.status} ${detail}`);
   }
 
   if (!resp.body) {
@@ -34,5 +35,5 @@ export async function streamChat(payload, handlers) {
 
   await parseEventStream(reader, (event) => handlers.onEvent?.(event));
 
-  handlers.onDone?.();
+  await Promise.resolve(handlers.onDone?.());
 }

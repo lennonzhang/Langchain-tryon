@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any, Iterator, Sequence
 from urllib import error, request
@@ -17,6 +18,8 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from .message_builder import extract_text
 from .provider_event_normalizer import normalize_upstream_error, normalized_error_detail
+
+logger = logging.getLogger(__name__)
 
 _ERROR_PREVIEW_LIMIT = 200
 
@@ -338,6 +341,7 @@ class ProxyGatewayChatModel(BaseChatModel):
                     try:
                         event = json.loads(data_raw)
                     except Exception:  # noqa: BLE001
+                        logger.warning("Skipped malformed SSE event: %.200s", data_raw)
                         continue
 
                     etype = event.get("type")
@@ -476,6 +480,7 @@ class ProxyGatewayChatModel(BaseChatModel):
                     try:
                         event = json.loads(data_raw)
                     except Exception:  # noqa: BLE001
+                        logger.warning("Skipped malformed SSE event: %.200s", data_raw)
                         continue
                     etype = event.get("type")
                     last_event_type = str(etype or frame.get("event") or "unknown")
@@ -532,6 +537,7 @@ class ProxyGatewayChatModel(BaseChatModel):
                     try:
                         event = json.loads(data_raw)
                     except Exception:  # noqa: BLE001
+                        logger.warning("Skipped malformed SSE event: %.200s", data_raw)
                         continue
 
                     etype = event.get("type")
@@ -577,7 +583,8 @@ class ProxyGatewayChatModel(BaseChatModel):
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(_detail_from_exception(f"openai/{self.model}", exc)) from exc
 
-    def _invoke_google(self, messages: list[BaseMessage]) -> tuple[AIMessage, dict[str, Any]]:
+    def _build_google_body(self, messages: list[BaseMessage]) -> tuple[dict[str, Any], dict[str, str]]:
+        """Build request body and headers shared by invoke and stream paths."""
         mapped_messages, system_prompt = _messages_to_role_content(messages)
         contents = []
         for item in mapped_messages:
@@ -585,13 +592,17 @@ class ProxyGatewayChatModel(BaseChatModel):
             g_role = "model" if role == "assistant" else "user"
             contents.append({"role": g_role, "parts": [{"text": item.get("content", "")}]})
 
+        generation_config: dict[str, Any] = {
+            "temperature": self.temperature,
+            "topP": self.top_p,
+            "maxOutputTokens": self.max_completion_tokens,
+        }
+        if self.thinking_mode:
+            generation_config["thinkingConfig"] = {"thinkingBudget": 8192}
+
         body: dict[str, Any] = {
             "contents": contents,
-            "generationConfig": {
-                "temperature": self.temperature,
-                "topP": self.top_p,
-                "maxOutputTokens": self.max_completion_tokens,
-            },
+            "generationConfig": generation_config,
         }
         if system_prompt:
             body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
@@ -613,10 +624,15 @@ class ProxyGatewayChatModel(BaseChatModel):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
+        return body, headers
+
+    def _invoke_google(self, messages: list[BaseMessage]) -> tuple[AIMessage, dict[str, Any]]:
+        body, headers = self._build_google_body(messages)
         url = f"{self.base_url.rstrip('/')}/models/{self.model}:generateContent"
         data = _json_post(url, headers, body, self.timeout, model_id=f"google/{self.model}")
 
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
         for candidate in data.get("candidates", []):
             if not isinstance(candidate, dict):
@@ -627,8 +643,12 @@ class ProxyGatewayChatModel(BaseChatModel):
             for part in content.get("parts", []):
                 if not isinstance(part, dict):
                     continue
+                is_thought = bool(part.get("thought"))
                 if isinstance(part.get("text"), str):
-                    text_parts.append(part["text"])
+                    if is_thought:
+                        reasoning_parts.append(part["text"])
+                    else:
+                        text_parts.append(part["text"])
                 function_call = part.get("functionCall")
                 if isinstance(function_call, dict):
                     tool_calls.append(
@@ -639,8 +659,13 @@ class ProxyGatewayChatModel(BaseChatModel):
                         }
                     )
 
+        additional_kwargs: dict[str, Any] = {}
+        reasoning_text = "".join(reasoning_parts)
+        if reasoning_text:
+            additional_kwargs["reasoning_content"] = reasoning_text
+
         usage = data.get("usageMetadata", {}) if isinstance(data.get("usageMetadata"), dict) else {}
-        return AIMessage(content="".join(text_parts), tool_calls=tool_calls), {
+        return AIMessage(content="".join(text_parts), tool_calls=tool_calls, additional_kwargs=additional_kwargs), {
             "usage": usage,
             "model": data.get("modelVersion", self.model),
         }
@@ -649,43 +674,10 @@ class ProxyGatewayChatModel(BaseChatModel):
         """Stream via Google streamGenerateContent SSE.
 
         Endpoint: POST /models/{model}:streamGenerateContent?alt=sse
-        Each SSE data line is a partial response with candidates[].content.parts[].text.
+        Each SSE data line is a partial response with candidates[].content.parts[].
+        Parts with ``thought: true`` carry reasoning tokens; others carry output text.
         """
-        mapped_messages, system_prompt = _messages_to_role_content(messages)
-        contents = []
-        for item in mapped_messages:
-            role = item.get("role", "user")
-            g_role = "model" if role == "assistant" else "user"
-            contents.append({"role": g_role, "parts": [{"text": item.get("content", "")}]})
-
-        body: dict[str, Any] = {
-            "contents": contents,
-            "generationConfig": {
-                "temperature": self.temperature,
-                "topP": self.top_p,
-                "maxOutputTokens": self.max_completion_tokens,
-            },
-        }
-        if system_prompt:
-            body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
-        if self.bound_tools:
-            body["tools"] = [
-                {
-                    "functionDeclarations": [
-                        {
-                            "name": t["name"],
-                            "description": t.get("description", ""),
-                            "parameters": t.get("parameters", {"type": "object", "properties": {}}),
-                        }
-                    ]
-                }
-                for t in self.bound_tools
-            ]
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
+        body, headers = self._build_google_body(messages)
         payload = json.dumps(body).encode("utf-8")
         url = f"{self.base_url.rstrip('/')}/models/{self.model}:streamGenerateContent?alt=sse"
         req = request.Request(url, data=payload, headers=headers, method="POST")
@@ -699,9 +691,9 @@ class ProxyGatewayChatModel(BaseChatModel):
                     try:
                         chunk_data = json.loads(data_raw)
                     except Exception:  # noqa: BLE001
+                        logger.warning("Skipped malformed SSE event: %.200s", data_raw)
                         continue
 
-                    # Error response
                     if chunk_data.get("error"):
                         err = chunk_data["error"]
                         msg = str(err.get("message") or "upstream stream error") if isinstance(err, dict) else str(err)
@@ -716,9 +708,18 @@ class ProxyGatewayChatModel(BaseChatModel):
                         for part in content.get("parts", []):
                             if not isinstance(part, dict):
                                 continue
+                            is_thought = bool(part.get("thought"))
                             text = part.get("text")
                             if isinstance(text, str) and text:
-                                yield ChatGenerationChunk(message=AIMessageChunk(content=text))
+                                if is_thought:
+                                    yield ChatGenerationChunk(
+                                        message=AIMessageChunk(
+                                            content="",
+                                            additional_kwargs={"reasoning_content": text},
+                                        ),
+                                    )
+                                else:
+                                    yield ChatGenerationChunk(message=AIMessageChunk(content=text))
         except error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="ignore")
             info = normalize_upstream_error(

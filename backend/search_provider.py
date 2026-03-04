@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 
 class SearchProvider:
@@ -38,5 +41,6 @@ class SearchProvider:
             self._emit({"type": "search_done", "results": results})
             return context, results
         except Exception as exc:  # noqa: BLE001
+            logger.warning("Search failed: %s", exc, exc_info=True)
             self._emit({"type": "search_error", "error": str(exc)})
             return "", []

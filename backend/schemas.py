@@ -28,13 +28,26 @@ class ChatRequest:
     images: list[str]
     request_id: str
 
+    _MAX_MESSAGE_CHARS = 100_000
+    _MAX_HISTORY_ITEMS = 100
+    _MAX_IMAGE_ITEMS = 10
+
     @classmethod
     def from_dict(cls, data: dict) -> ChatRequest:
         message = str(data.get("message", "")).strip()
+        if len(message) > cls._MAX_MESSAGE_CHARS:
+            raise ValidationError("message", f"too long (max {cls._MAX_MESSAGE_CHARS} chars)")
 
-        history = data.get("history", [])
-        if not isinstance(history, list):
-            history = []
+        raw_history = data.get("history", [])
+        if not isinstance(raw_history, list):
+            raw_history = []
+        history = [
+            item
+            for item in raw_history[-cls._MAX_HISTORY_ITEMS:]
+            if isinstance(item, dict)
+            and isinstance(item.get("role"), str)
+            and isinstance(item.get("content"), str)
+        ]
 
         model = data.get("model")
         if not isinstance(model, str):
@@ -48,9 +61,10 @@ class ChatRequest:
 
         thinking_mode = bool(data.get("thinking_mode", True))
 
-        images = data.get("images", [])
-        if not isinstance(images, list):
-            images = []
+        raw_images = data.get("images", [])
+        if not isinstance(raw_images, list):
+            raw_images = []
+        images = [img for img in raw_images[:cls._MAX_IMAGE_ITEMS] if isinstance(img, str)]
 
         request_id = data.get("request_id")
         if not isinstance(request_id, str) or not request_id.strip():

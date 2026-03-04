@@ -2,6 +2,165 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-04 (Frontend Stream Terminal Consistency + Race Hardening)
+
+### Summary
+
+Hardened frontend stream terminal handling to remove cleanup races and ensure only one terminal outcome is applied per request.
+
+### Frontend
+
+- **Await terminal callbacks**:
+  - `useStreamController` now awaits `onTransportError` and `onAborted`
+  - `chatApiClient.streamChat` now awaits `handlers.onDone`
+- **Single terminal exit**:
+  - `useSendMessage` introduces request-scoped `finalizeStreamOnce` with idempotent guard
+  - terminal causes (`done`, transport error, aborted) converge through one path
+  - first terminal signal wins, preventing `done`/abort/error overwrite races
+- **Event handling cleanup**:
+  - `onEvent` no longer finalizes on `done`; it records terminal error context and only applies incremental content updates
+
+### Tests
+
+- New unit tests: `frontend-react/src/__tests__/useStreamController.test.jsx`
+  - verifies `onAborted` callback is awaited
+  - verifies `onTransportError` callback is awaited
+- Expanded behavior tests in `frontend-react/src/__tests__/App.behavior.test.jsx`
+  - global single-stream blocking and explicit stop flow
+  - `done + abort` race: first terminal outcome wins
+  - `done + transport error` race: first terminal outcome wins
+
+### Validation
+
+- `pnpm test` passed
+- `pnpm test:e2e` passed
+- `pnpm run build` passed
+
+## 2026-03-04 (Frontend Optimization: Performance, Robustness, UI Quality)
+
+### Summary
+
+Frontend optimization pass covering streaming performance, error resilience, UI improvements, and legacy code cleanup.
+
+### Performance
+
+- **MathJax debounce**: `RichBlock` now debounces `MathJax.typesetPromise()` by 500ms, avoiding expensive typesetting on every streaming token. (`frontend-react/src/components/RichBlock.jsx`)
+- **Message memoization**: `UserMessage` and `AssistantMessage` extracted as `memo()` components in `MessageList`, preventing completed messages from re-rendering during streaming. (`frontend-react/src/components/MessageList.jsx`)
+- **content-visibility**: Completed messages (`.msg.assistant:not(.stream)`, `.msg.stream-done`) use `content-visibility: auto` to skip off-screen rendering. (`frontend-react/src/styles.css`)
+
+### Robustness
+
+- **ErrorBoundary**: New `ErrorBoundary` class component wraps `<AppContent>` at top level and each `<RichBlock>` in `StreamMessage` per-message. Catches render crashes with retry button. (`frontend-react/src/components/ErrorBoundary.jsx`)
+- **AbortController**: `streamChat()` now accepts an optional `signal` param. `useStreamController` creates and manages an `AbortController` per stream, aborting in-flight requests before starting new ones. (`frontend-react/src/shared/api/chatApiClient.js`, `frontend-react/src/features/chat/useStreamController.js`)
+- **Send mutex**: `useSendMessage` uses a synchronous `sendingRef` mutex to prevent double-send race conditions between the Zustand state check and `startRequest()`. (`frontend-react/src/features/chat/useSendMessage.js`)
+- **Stream retry**: `useStreamController` retries once (2s backoff) on network errors or 5xx status, but only when no tokens have been received yet — avoids duplicate answers/billing. (`frontend-react/src/features/chat/useStreamController.js`)
+
+### UI
+
+- **Copy button**: `CopyButton` component added to completed stream messages and static assistant messages. Visible on hover, shows "Copied!" feedback for 2s. (`frontend-react/src/components/CopyButton.jsx`)
+- **Skeleton loading**: `MessageList` shows shimmer skeleton blocks when a session is loading and messages are empty. (`frontend-react/src/components/MessageList.jsx`, `frontend-react/src/styles.css`)
+- **Session filter debounce**: `SessionSidebar` filter input uses local state for responsive typing with 200ms debounce to the store. (`frontend-react/src/features/sessions/SessionSidebar.jsx`)
+- **Mobile breakpoint**: New `@media (max-width: 600px)` breakpoint with full-screen sidebar overlay, smaller header, wider messages. (`frontend-react/src/styles.css`)
+
+### Code Cleanup
+
+- **Legacy removal**: Removed `LegacyApp` component, `useChatStream` hook, `CHAT_V2_LAYOUT` feature flag, and `stream.js` re-export barrel. (`frontend-react/src/App.jsx`, deleted `frontend-react/src/hooks/useChatStream.js`, `frontend-react/src/shared/lib/features.js`, `frontend-react/src/stream.js`)
+- **Test migration**: `stream.test.js` and `stream.fixtures.test.js` now import directly from `shared/lib/sse/parseEventStream` instead of the deleted barrel.
+
+## 2026-03-03 (Backend Hardening: Security, Robustness, Code Quality)
+
+### Summary
+
+Comprehensive backend optimization pass addressing security boundaries, input validation, streaming robustness, observability, and code quality.
+
+### Security
+
+- **Payload size limit**: `read_json_body()` now enforces a 10 MB cap via `PayloadTooLargeError` → HTTP 413. Guards negative and non-numeric `Content-Length` headers. (`backend/http_utils.py`)
+- **Path traversal fix**: `serve_static()` replaced fragile `str.startswith()` check with `Path.relative_to()`. (`backend/http_utils.py`)
+- **Error sanitization**: `serve_static()` no longer exposes internal path details to clients; errors logged server-side. (`backend/http_utils.py`)
+
+### Robustness
+
+- **Request validation**: Message length capped at 100k chars (raises `ValidationError`); history items filtered to valid `{role: str, content: str}` dicts (max 100); images filtered to strings (max 10). (`backend/schemas.py`)
+- **413 routing**: `handle_chat_once` and `handle_chat_stream` now catch `PayloadTooLargeError` → 413 before the generic 400 path. (`backend/chat_handlers.py`)
+- **Agent timeout**: `stream_agentic()` drain loop enforces a 600-second soft deadline; emits `error` + `done(error)` on timeout. (`backend/event_mapper.py`)
+- **Upstream error truncation**: `normalize_upstream_error()` caps `raw_body` at 5 KB to prevent memory bloat from oversized error payloads. (`backend/provider_event_normalizer.py`)
+
+### Observability
+
+- **SSE parse logging**: All 4 stream methods in `ProxyGatewayChatModel` now log `warning` when an SSE event fails JSON parsing (truncated to 200 chars). (`backend/proxy_chat_model.py`)
+- **Search error logging**: `SearchProvider.search_with_events()` logs `warning` with stack trace on failure. (`backend/search_provider.py`)
+
+### Performance & Code Quality
+
+- **Registry index**: `model_registry.py` builds an `_INDEX` dict at module load for O(1) `get_by_id()` lookups. (`backend/model_registry.py`)
+- **Simplified logic**: `_should_use_agentic_flow()` reduced from 3 branches to 2 (redundant `agent_mode is True` branch removed). (`backend/nvidia_client.py`)
+- **Avoid duplicate work**: `_build_nvidia_chat_model()` now receives `pcfg` as parameter instead of re-calling `get_params()`. (`backend/model_profile.py`)
+- **Named constants**: Extracted magic numbers in `message_builder.py` to `_MAX_MEDIA_ITEMS`, `_MAX_HISTORY_ITEMS`, `_MAX_URL_DISPLAY_CHARS`, `_CHARS_PER_TOKEN`, `_OVERHEAD_TOKENS_PER_MSG`.
+
+### Tests Added
+
+- `test_http_utils.py`: payload size limit, path traversal, error detail absence
+- `test_chat_handlers.py`: 413 for oversized payloads
+- `test_schemas.py`: message length, history filtering, image filtering
+- `test_event_mapper.py` (new): agent timeout emits error + done sequence
+- `test_proxy_chat_model.py`: malformed SSE event triggers warning log
+- `test_search_provider.py`: search failure triggers warning log
+
+### Files Modified
+
+- `backend/http_utils.py`, `backend/chat_handlers.py`, `backend/schemas.py`
+- `backend/proxy_chat_model.py`, `backend/event_mapper.py`, `backend/search_provider.py`
+- `backend/model_registry.py`, `backend/nvidia_client.py`, `backend/model_profile.py`
+- `backend/message_builder.py`, `backend/provider_event_normalizer.py`
+- `tests/test_http_utils.py`, `tests/test_chat_handlers.py`, `tests/test_schemas.py`
+- `tests/test_event_mapper.py` (new), `tests/test_proxy_chat_model.py`, `tests/test_search_provider.py`
+
+---
+
+## 2026-03-03 (Consolidate Google Models to gemini-3-pro-preview)
+
+### Summary
+
+Replaced `google/gemini-2.5-flash` and `google/gemini-3-flash-preview` with a single `google/gemini-3-pro-preview` model entry. All Google thinking/reasoning support (thinkingConfig, thought-part parsing) carries over unchanged.
+
+### Files Modified
+
+- `backend/model_registry.py`: two Google entries replaced with one `google/gemini-3-pro-preview`
+- `api_examples.py`: updated model name and response comment
+- `tests/test_model_registry.py`, `tests/test_model_profile.py`, `tests/test_proxy_chat_model.py`, `tests/test_nvidia_client.py`: all Google model references updated
+- `CLAUDE.md`, `AGENTS.md`, `README.md`: model list updated
+
+---
+
+## 2026-03-03 (Add Gemini 2.5 Flash + Google Thinking Support)
+
+### Summary
+
+Added `google/gemini-2.5-flash` as a fully supported model (thinking, agent, SSE streaming) and implemented thinking/reasoning support for all Google models via the `thought: true` part flag in the Gemini generateContent API.
+
+### Backend
+
+- **Model registry**: New `google/gemini-2.5-flash` entry (provider: google, protocol: google_generate_content, context: 1M tokens, agent-capable with thinking)
+- **Google thinking support**: `_invoke_google` and `_stream_google` in `proxy_chat_model.py` now detect `thought: true` on response parts and route them as `reasoning_content` (same pattern as Anthropic thinking_delta and OpenAI reasoning.delta)
+- **thinkingConfig**: Google request body includes `generationConfig.thinkingConfig.thinkingBudget` when `thinking_mode` is enabled
+- **Refactored**: Extracted `_build_google_body` shared helper for invoke/stream body+header construction (mirrors `_build_openai_body` pattern)
+
+### Tests
+
+- `test_known_models_present`: added `google/gemini-2.5-flash`
+- `test_gemini_25_flash_capabilities`: thinking + agent enabled, media disabled
+- `test_gemini_25_flash_metadata`: provider=google, upstream=gemini-2.5-flash, protocol=google_generate_content, context=1048576
+
+### Files Modified
+
+- `backend/model_registry.py`: new registry entry
+- `backend/proxy_chat_model.py`: `_build_google_body`, `_invoke_google`, `_stream_google` updated
+- `tests/test_model_registry.py`: 3 new/updated assertions
+- `CLAUDE.md`, `AGENTS.md`: model list + protocol notes updated
+
+---
+
 ## 2026-03-03 (Fix Multi-Message Loading State)
 
 ### Summary

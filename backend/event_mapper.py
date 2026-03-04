@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 
 from .message_builder import build_messages, context_usage_payload, extract_text
 from .model_profile import proxy_env_guard, stream_or_invoke_kwargs
 from .search_provider import SearchProvider
+
+_AGENT_TIMEOUT_S = 600  # 10-minute soft timeout for agent thread
 
 
 def stream_agentic(
@@ -69,7 +72,12 @@ def stream_agentic(
         ),
     }
 
+    deadline = time.monotonic() + _AGENT_TIMEOUT_S
     while worker.is_alive() or not result_queue.empty():
+        if time.monotonic() > deadline:
+            yield {"type": "error", "error": "Agent execution timed out"}
+            yield {"type": "done", "finish_reason": "error"}
+            return
         try:
             evt = result_queue.get(timeout=0.1)
         except queue.Empty:

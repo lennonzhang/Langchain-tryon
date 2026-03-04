@@ -57,8 +57,10 @@ pnpm test:e2e
 - `frontend-react/src/features/chat/*`: send pipeline, stream controller, event mapping
 - `frontend-react/src/entities/session/*`: session summaries + in-memory repository
 - `frontend-react/src/shared/store/chatUiStore.js`: global UI/runtime state
-- `frontend-react/src/shared/api/chatApiClient.js`: capabilities + stream transport
+- `frontend-react/src/shared/api/chatApiClient.js`: capabilities + stream transport (AbortController support, `onDone` awaited)
 - `frontend-react/src/shared/lib/sse/parseEventStream.js`: SSE parsing (LF/CRLF tolerant)
+- `frontend-react/src/components/ErrorBoundary.jsx`: React error boundary (app + per-message)
+- `frontend-react/src/components/CopyButton.jsx`: clipboard copy with visual feedback
 - `frontend-react/src/hooks/*`, `components/*`, `utils/*`: frontend state and UI modules
 - `api/capabilities.py`, `api/chat.py`, `api/chat/stream.py`: Vercel wrappers
 
@@ -84,14 +86,15 @@ pnpm test:e2e
 - `frontend-react/src/App.jsx`: app composition
 - `frontend-react/src/app/AppProviders.jsx`: app-level providers
 - `frontend-react/src/features/sessions/useSessions.js`: session query/mutation hooks
-- `frontend-react/src/features/chat/useSendMessage.js`: session-aware stream send pipeline
+- `frontend-react/src/features/chat/useSendMessage.js`: session-aware stream send pipeline (`finalizeStreamOnce` terminal single-exit)
 - `frontend-react/src/features/chat/mapStreamEventToPatch.js`: stream event reducer
 - `frontend-react/src/shared/store/chatUiStore.js`: UI/runtime store
 - `frontend-react/src/hooks/useCapabilities.js`: capability bootstrap and model selection
-- `frontend-react/src/hooks/useChatStream.js`: streaming state machine
 - `frontend-react/src/hooks/useAttachments.js`: media attachment workflow
-- `frontend-react/src/components/MessageList.jsx`: message list container + scroll event boundary
-- `frontend-react/src/stream.js`: SSE parser
+- `frontend-react/src/components/MessageList.jsx`: message list container + scroll event boundary (memoized items)
+- `frontend-react/src/components/RichBlock.jsx`: markdown rendering with MathJax debounce
+- `frontend-react/src/components/ErrorBoundary.jsx`: React error boundary (app-level + per-message)
+- `frontend-react/src/components/CopyButton.jsx`: clipboard copy with feedback
 - `frontend-react/tests/e2e/chat-stream.spec.ts`: end-to-end chat stream behavior coverage
 - `frontend-react/tests/helpers/mockSse.ts`: e2e SSE route mocking + fixture normalization
 - `frontend-react/tests/fixtures/sse/*`: SSE fixture files (including multi-token stream cases)
@@ -102,7 +105,14 @@ pnpm test:e2e
 
 Request fields:
 
-- `message` (required), `history`, `model`, `web_search`, `agent_mode`, `thinking_mode`, `images`, `request_id`
+- `message` (required, max 100k chars), `history` (max 100, validated dicts), `model`, `web_search`, `agent_mode`, `thinking_mode`, `images` (max 10, strings only), `request_id`
+
+Request limits:
+
+- JSON body max size: 10 MB (413 Payload Too Large if exceeded)
+- `message` max length: 100,000 characters (400 ValidationError)
+- `history` max items: 100 (silently trimmed); items must be `{role: str, content: str}`
+- `images` max items: 10 (silently trimmed); items must be strings
 
 SSE events:
 
@@ -110,6 +120,7 @@ SSE events:
 - Agent: `agent_plan`, `agent_step_start`, `agent_step_end`, `tool_call`, `tool_result`, `agent_reflect`
 - Enrichment: `v: 1`, plus `request_id` when available
 - Error invariant: `error` then `done` (`finish_reason: "error"`)
+- Agent timeout: 600s soft deadline; emits `error` + `done(error)` if exceeded
 
 ## Model Rules
 
@@ -117,7 +128,7 @@ SSE events:
   - NVIDIA: `moonshotai/kimi-k2.5`, `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
   - Anthropic: `anthropic/claude-sonnet-4-6` (via sssaicode proxy)
   - OpenAI: `openai/gpt-5.3-codex` (default, via sssaicode proxy)
-  - Google: `google/gemini-3-flash-preview` (via sssaicode proxy)
+  - Google: `google/gemini-3-pro-preview` (via sssaicode proxy)
 - Default model: `openai/gpt-5.3-codex`
 - Auto `agent_mode` when omitted:
   - on: qwen, glm, claude, codex, gemini
@@ -130,7 +141,7 @@ SSE events:
 - Provider protocols:
   - `anthropic_messages`: POST `/messages` (Anthropic Messages API, SSE stream)
   - `openai_responses`: POST `/responses` (OpenAI Responses API, SSE stream, `stream: true` required, `reasoning` required)
-  - `google_generate_content`: POST `/models/{model}:generateContent` (invoke) or `:streamGenerateContent?alt=sse` (stream)
+  - `google_generate_content`: POST `/models/{model}:generateContent` (invoke) or `:streamGenerateContent?alt=sse` (stream); `thinkingConfig` in `generationConfig` controls thinking budget; response parts with `thought: true` carry reasoning tokens
 - OpenAI Responses API constraints:
   - `temperature` / `top_p` must NOT be sent as top-level fields (causes 400)
   - `reasoning` must always be present (`effort: "high"` when thinking, `effort: "low"` otherwise)
@@ -141,7 +152,9 @@ SSE events:
 ## Frontend Notes
 
 - Chat auto-scroll rule: only follow stream when message list is near bottom (`<= 150px`); preserve user position when they scroll up.
-- E2E SSE fixture handling should use LF-normalized content to match `frontend-react/src/stream.js` block splitting.
+- E2E SSE fixture handling should use LF-normalized content to match `frontend-react/src/shared/lib/sse/parseEventStream.js` block splitting.
+- Frontend stream policy is global single in-flight request; new sends do not auto-preempt existing streams, and user must stop the running session explicitly.
+- Frontend terminal callbacks are awaited (`onDone`, `onTransportError`, `onAborted`) to prevent pending-state cleanup races.
 
 ## Documentation Rule
 

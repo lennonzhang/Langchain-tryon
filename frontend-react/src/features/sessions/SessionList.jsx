@@ -5,7 +5,7 @@ function formatTime(isoTime) {
   return date.toLocaleString();
 }
 
-export default function SessionList({ sessions, activeSessionId, filter, onSelect, onDelete }) {
+export default function SessionList({ sessions, activeSessionId, runningSessionId = null, filter, onSelect, onDelete }) {
   const normalizedFilter = (filter || "").trim().toLowerCase();
   const visible = normalizedFilter
     ? sessions.filter((session) => {
@@ -24,6 +24,11 @@ export default function SessionList({ sessions, activeSessionId, filter, onSelec
     <ul className="session-list" data-testid="session-list">
       {visible.map((session) => (
         <li key={session.id}>
+          {session.id === runningSessionId && (
+            <span className="session-running-badge" aria-label={`Running ${session.title}`}>
+              Running
+            </span>
+          )}
           <button
             type="button"
             className={`session-item ${activeSessionId === session.id ? "is-active" : ""}`}
@@ -37,6 +42,7 @@ export default function SessionList({ sessions, activeSessionId, filter, onSelec
             type="button"
             className="session-delete"
             aria-label={`Delete ${session.title}`}
+            disabled={session.id === runningSessionId}
             onClick={() => onDelete(session.id)}
           >
             Delete
