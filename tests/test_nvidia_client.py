@@ -15,6 +15,7 @@ from backend.nvidia_client import (
     chat_once,
     stream_chat,
 )
+from backend.model_profile import output_tokens
 
 
 class FakeClient:
@@ -243,7 +244,7 @@ class TestNvidiaClient(unittest.TestCase):
             fake_client.invoked_messages[0],
             {"role": "system", "content": "search system context"},
         )
-        self.assertEqual(fake_client.invoke_kwargs["max_completion_tokens"], 16384)
+        self.assertEqual(fake_client.invoke_kwargs["max_completion_tokens"], output_tokens())
         self.assertEqual(fake_client.invoke_kwargs["chat_template_kwargs"], {"thinking": False})
 
     def test_chat_once_kimi_search_keeps_non_agentic_injection(self):
@@ -338,11 +339,16 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertIn({"type": "reasoning", "content": "think-1"}, events)
         self.assertIn({"type": "token", "content": "token-1"}, events)
         self.assertIn({"type": "token", "content": "token-2"}, events)
+        final_usage_events = [
+            evt for evt in events
+            if evt.get("type") == "context_usage" and evt.get("usage", {}).get("phase") == "final"
+        ]
+        self.assertEqual(len(final_usage_events), 1)
         self.assertEqual(events[-1]["type"], "done")
         self.assertEqual(
             fake_client.stream_kwargs,
             {
-                "max_completion_tokens": 16384,
+                "max_completion_tokens": output_tokens(),
                 "chat_template_kwargs": {"thinking": True},
             },
         )
@@ -379,7 +385,7 @@ class TestNvidiaClient(unittest.TestCase):
         )
         self.assertIn({"type": "token", "content": "ok"}, events)
         self.assertFalse(any(evt.get("type") == "reasoning" for evt in events))
-        self.assertEqual(fake_client.stream_kwargs, {"max_completion_tokens": 16384})
+        self.assertEqual(fake_client.stream_kwargs, {"max_completion_tokens": output_tokens()})
 
     def test_stream_chat_qwen_thinking_on_emits_reasoning(self):
         fake_client = FakeClient(
@@ -414,7 +420,7 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertEqual(
             fake_client.stream_kwargs,
             {
-                "max_completion_tokens": 16384,
+                "max_completion_tokens": output_tokens(),
                 "chat_template_kwargs": {"enable_thinking": True},
             },
         )
@@ -598,6 +604,11 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertTrue(any(evt.get("type") == "search_done" for evt in events))
         self.assertIn({"type": "reasoning", "content": "agent thought"}, events)
         self.assertIn({"type": "token", "content": "final agent answer"}, events)
+        final_usage_events = [
+            evt for evt in events
+            if evt.get("type") == "context_usage" and evt.get("usage", {}).get("phase") == "final"
+        ]
+        self.assertEqual(len(final_usage_events), 1)
         self.assertEqual(events[-1]["type"], "done")
 
     def test_stream_chat_agent_mode_emits_events_before_agent_finishes(self):

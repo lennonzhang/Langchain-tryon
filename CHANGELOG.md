@@ -2,6 +2,225 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-05 (Session Sidebar Fixed-Responsive Width + Mobile Drawer)
+
+### Summary
+
+Adjusted session sidebar layout to keep a stable responsive width on non-mobile screens, fixed internal text column width for title/preview, and switched mobile behavior to a left drawer opened from the chat header.
+
+### Frontend
+
+- Sidebar layout:
+  - replaced content-driven sidebar sizing with responsive fixed width tokens
+  - desktop/tablet keeps two-column layout (`sidebar + chat`) without mid-breakpoint stacking
+- Session item internals:
+  - title/preview text area now uses fixed column width for stable truncation and alignment
+  - time column stays independent on the right
+- Mobile drawer UX:
+  - added chat-header `Sessions` trigger (`aria-controls` + `aria-expanded`)
+  - session sidebar becomes a left overlay drawer on `<=600px`
+  - selecting session / creating new chat / clicking backdrop closes drawer on mobile
+
+### Tests
+
+- Added `frontend-react/src/__tests__/SessionSidebar.test.jsx`:
+  - mobile auto-close after session select and new chat
+  - desktop no auto-close
+  - backdrop closes sidebar
+- Updated `frontend-react/src/__tests__/App.behavior.test.jsx`:
+  - header sessions button opens sidebar and updates accessibility state
+- Updated `frontend-react/src/__tests__/SessionList.test.jsx`:
+  - fixed text-column rendering sanity for long title/preview
+
+## 2026-03-05 (Proxy Stream Error Type Preservation)
+
+### Summary
+
+Fixed provider stream error normalization so SSE `error` frames preserve upstream error type metadata (for example `type=request_error`) instead of degrading to `type=unknown_error`.
+
+### Backend
+
+- Added `_detail_from_stream_error_event(...)` in `backend/proxy_chat_model.py`.
+- Updated Anthropic/OpenAI/Google stream error branches to raise normalized detail directly from provider SSE payloads.
+- Updated OpenAI invoke-path SSE `error` handling to preserve upstream `error.type` as well.
+
+### Tests
+
+- Updated `tests/test_proxy_chat_model.py`:
+  - strengthened `test_openai_stream_event_error_is_normalized` with `type=request_error` assertion
+  - added `test_openai_invoke_event_error_is_normalized`
+
+### Validation
+
+- `.\.venv\Scripts\python.exe -m unittest tests.test_proxy_chat_model tests.test_chat_handlers -v` passed (67 tests).
+
+## 2026-03-05 (Reasoning Stream Readability + Multi-turn Visibility)
+
+### Summary
+
+Fixed reasoning stream rendering readability and improved same-session multi-turn visibility by auto-expanding the current round while folding historical rounds.
+
+### Frontend
+
+- **Reasoning chunk merge readability**:
+  - `mapStreamEventToPatch` now uses `mergeReasoningChunk(prev, next)` instead of raw concatenation
+  - adds safe spacing for merged alphanumeric boundaries (prevents `ratiosPlanning` style concatenation)
+  - adds `agent_step_start`-driven paragraph breaks so new agent steps render on separate lines
+  - adds paragraph splitting for step-like reasoning chunks (capitalized multi-word chunk boundaries)
+  - adds in-chunk sticky split fallback (`...stepsPlanning...`, `...limitations****Confirming...`)
+  - inserts paragraph breaks before markdown block starts like `****`, headings, and list prefixes when needed
+  - preserves incoming leading whitespace/punctuation behavior
+  - does not force spacing for CJK chunk boundaries
+- **Reasoning visibility policy**:
+  - `MessageList` now marks the focused request (active request, or latest stream round fallback)
+  - `StreamMessage` reasoning panel defaults to open for focused/current round and defaults to folded for historical rounds
+  - reasoning section remount key includes current/history state so previous round folds automatically when a new round starts
+- **Visual tuning**:
+  - reasoning body text now uses a muted gray tone to reduce visual noise
+
+### Tests
+
+- Updated `mapStreamEventToPatch.test.js` with chunk-merge readability coverage:
+  - alphanumeric seam spacing
+  - step-event boundary split (`agent_step_start -> reasoning`)
+  - duplicate-step no-extra-break guard
+  - in-chunk sticky step/markdown split
+  - markdown block paragraph breaks
+  - existing whitespace preservation
+  - CJK no-forced-space case
+- Updated `MessageList.test.jsx` and `StreamMessage.test.jsx` for current vs historical reasoning panel behavior
+- Updated `App.behavior.test.jsx` with same-session two-turn reasoning visibility integration case
+
+## 2026-03-05 (Composer Stop Toggle + Session Delete Placement + Final Context Usage)
+
+### Summary
+
+Implemented UX and stream-contract follow-ups: moved stop control into the composer send button state, stabilized session delete placement, simplified chat header height/content, and added terminal context-usage refresh (`phase=final`) before normal stream completion.
+
+### Frontend
+
+- **Composer stop/send toggle**:
+  - removed status-bar stop button
+  - composer submit button now switches to `Stop` state (outer circle, inner square) only for the active running session
+  - when another session is running, input/send remain disabled (global single in-flight policy unchanged)
+- **Session delete action**:
+  - moved delete control to session card bottom-right
+  - removed hover-only hidden behavior; control is always visible
+  - running sessions remain non-deletable (`disabled`) with existing data-layer guard preserved
+- **Header simplification**:
+  - removed right-side feature pills/meta block
+  - reduced header vertical density and copy length
+- **Session UX polish**:
+  - invalid `updatedAt` no longer renders `Invalid Date` tooltip
+  - clearing session filter now applies immediately (no debounce delay)
+- **Context usage rendering**:
+  - `mapStreamEventToPatch` now replaces `usageLines` when receiving `context_usage` with `phase=final`
+
+### Backend
+
+- **Terminal context usage update**:
+  - `stream_direct` now emits final `context_usage` before `done(stop)`, based on input messages + final visible answer
+  - `stream_agentic` now emits final `context_usage` before `done(stop)`, based on input messages + collected token output
+- Error flow invariant remains unchanged: `error` is still followed by `done(error)`.
+
+### Tests
+
+- Updated frontend tests:
+  - `mapStreamEventToPatch.test.js` adds `phase=final` overwrite assertion
+  - `SessionList.test.jsx` adds invalid-date tooltip guard
+- Updated backend tests:
+  - `test_nvidia_client.py` asserts a terminal `context_usage` event with `phase=final` for direct and agentic streams
+
+## 2026-03-05 (Draft Session Switching Fix + Sidebar Card UI Refresh)
+
+### Summary
+
+Fixed new-chat switching behavior so draft mode no longer reuses previous session messages, and refreshed the session sidebar into a card-based information layout.
+
+### Frontend
+
+- **Draft session behavior (`NEW_SESSION_KEY`)**:
+  - fixed query state transition so switching to draft view no longer shows stale previous-session data
+  - `App` now treats `NEW_SESSION_KEY` as a hard draft branch and does not consume session detail data there
+  - unsent draft text is preserved when switching to existing sessions and restored when returning to `+ New Chat`
+  - first send from draft now clears the `NEW_SESSION_KEY` draft to prevent sent text from reappearing later
+- **Session sidebar UI**:
+  - added session header with workspace context and conversation count
+  - upgraded search area (inline search label + clear action)
+  - card-style session rows with top meta row, preview clamping, and `Active` / `Running` badges
+  - delete action moved to floating secondary action with clearer hover/focus affordance
+  - added stronger focus-visible styles for keyboard navigation
+- **react-query lite optimization**:
+  - `useQuery` now re-initializes local state when `queryKey` changes, including disabled-query branches
+  - cache subscription now avoids redundant `setState` when value is unchanged
+
+### Tests
+
+- Added `frontend-react/src/__tests__/reactQueryLite.test.jsx`:
+  - verifies key-switch state reset under `enabled=false`
+- Expanded `frontend-react/src/__tests__/App.behavior.test.jsx`:
+  - verifies draft switching semantics (`+ New Chat` hides old messages, preserves unsent draft, clears after first send)
+- Updated `frontend-react/src/__tests__/SessionList.test.jsx`:
+  - includes `Active` badge assertion for updated card layout semantics
+
+### Validation
+
+- `pnpm test` passed (58 tests)
+- `pnpm run build` passed
+
+## 2026-03-05 (Frontend UI Modernization Optimization Fixes)
+
+### Summary
+
+Implemented the frontend optimization follow-up for code review findings: reduced streaming-time rendering cost, simplified collapsible section state semantics, added Prism lazy loading, added mobile/fallback visual degradations for glass effects, and expanded test coverage.
+
+### Frontend
+
+- **RichBlock streaming/perf**:
+  - code copy behavior now uses one delegated click listener per `RichBlock` container (no per-button attach/detach churn)
+  - copy reset timers are tracked safely per button
+  - Prism highlighting is skipped during `streaming=true` and runs after completion
+  - only unhighlighted nodes are processed (`data-prism-highlighted`)
+- **Prism lazy loading**:
+  - removed eager `App.jsx` import of `prism-setup`
+  - added `frontend-react/src/utils/prism-loader.js` with module-level singleton promise (`ensurePrismLoaded`)
+  - Prism setup remains in `prism-setup.js`, now loaded on demand when code blocks exist
+- **Markdown hardening/cleanup**:
+  - removed deprecated `marked` options (`mangle`, `headerIds`)
+  - normalized fenced code language IDs to `[a-z0-9_-]` and defaulted to `text`
+- **CollapsibleSection simplification**:
+  - removed `forceOpen` prop and sync effect
+  - `Search` section now uses key-based remount by `search.state` and defaults to:
+    - open while `loading`
+    - collapsed on `done`/`error`
+- **Styles**:
+  - removed dead `.chat::after` highlight pseudo-element
+  - merged top highlight into `.chat` inset shadow
+  - added `@supports not (backdrop-filter: blur(1px))` fallback backgrounds
+  - added mobile (`max-width: 760px`) blur reduction for assistant message/sections
+
+### Tests
+
+- Added `frontend-react/src/__tests__/RichBlock.test.jsx`
+  - fenced code copy button rendering
+  - delegated copy behavior and reset timing
+  - skip highlight during stream + highlight after completion
+  - Prism lazy-load path
+- Added `frontend-react/src/__tests__/markdown.test.js`
+  - fenced wrapper/chrome output
+  - default language fallback to `text`
+  - language info-string normalization
+  - inline code path remains unwrapped
+- Added `frontend-react/src/__tests__/StreamMessage.test.jsx`
+  - search panel remount behavior from `loading -> done`
+  - manual toggle persistence when state key is unchanged
+
+### Documentation
+
+- Updated `docs/assistant/architecture-rules.md` with the stream-time Prism rule.
+- Updated `docs/assistant/validation-and-release-checklist.md` with code-block copy/highlight verification.
+- Updated `README.md` to reflect code-block copy/highlight behavior.
+
 ## 2026-03-05 (Progressive Disclosure Docs Refactor: AGENTS + CLAUDE)
 
 ### Summary

@@ -149,6 +149,17 @@ def context_usage_payload(model: str, phase: str, messages: list[dict[str, str]]
     }
 
 
+def context_usage_with_completion(
+    model: str,
+    phase: str,
+    messages: list[dict[str, str]],
+    completion_text: str,
+) -> dict:
+    enriched_messages = list(messages or [])
+    enriched_messages.append({"role": "assistant", "content": completion_text or ""})
+    return context_usage_payload(model, phase, enriched_messages)
+
+
 def history_as_messages(history: list) -> list:
     """Convert frontend history dicts to LangChain Message objects."""
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage

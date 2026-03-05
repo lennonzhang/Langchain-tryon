@@ -98,12 +98,40 @@ export function useQuery({ queryKey, queryFn, enabled = true }) {
 
   useEffect(() => {
     const unsub = client.subscribe(() => {
-      const cached = client.getQueryData(queryKeyRef.current);
-      setRevision((value) => value + 1);
-      setState((prev) => ({ ...prev, data: cached }));
+      const currentKey = queryKeyRef.current;
+      const cached = client.getQueryData(currentKey);
+      const stale = client.isStale(currentKey);
+      if (stale) {
+        setRevision((value) => value + 1);
+      }
+      setState((prev) => {
+        if (Object.is(prev.data, cached)) {
+          return prev;
+        }
+        return { ...prev, data: cached };
+      });
     });
     return unsub;
-  }, [client, keyString]);
+  }, [client]);
+
+  useEffect(() => {
+    const cached = client.getQueryData(queryKeyRef.current);
+    setState((prev) => {
+      const next = {
+        data: cached,
+        isLoading: enabled && cached === undefined,
+        error: null,
+      };
+      if (
+        Object.is(prev.data, next.data) &&
+        prev.isLoading === next.isLoading &&
+        prev.error === next.error
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [client, keyString, enabled]);
 
   useEffect(() => {
     let cancelled = false;

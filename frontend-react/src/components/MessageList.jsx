@@ -31,6 +31,11 @@ function SkeletonMessages() {
 }
 
 const MessageList = forwardRef(function MessageList({ messages, isPending, currentRequestId, onScroll, loading }, ref) {
+  const latestStreamRequestId = [...messages]
+    .reverse()
+    .find((msg) => msg.role === "assistant_stream" && msg.requestId)?.requestId || null;
+  const focusRequestId = currentRequestId || latestStreamRequestId;
+
   return (
     <div id="messages" className="messages" ref={ref} data-testid="messages-list" onScroll={onScroll}>
       {loading && messages.length === 0 && <SkeletonMessages />}
@@ -39,7 +44,16 @@ const MessageList = forwardRef(function MessageList({ messages, isPending, curre
           const hasRequestContext = Boolean(currentRequestId) && Boolean(msg.requestId);
           const sameRequest = hasRequestContext ? msg.requestId === currentRequestId : true;
           const showTyping = Boolean(isPending && msg.status === "streaming" && sameRequest);
-          return <StreamMessage key={msg.id} msg={msg} showTyping={showTyping} />;
+          const isCurrentRequestMessage =
+            Boolean(focusRequestId) && Boolean(msg.requestId) && msg.requestId === focusRequestId;
+          return (
+            <StreamMessage
+              key={msg.id}
+              msg={msg}
+              showTyping={showTyping}
+              isCurrentRequestMessage={isCurrentRequestMessage}
+            />
+          );
         }
         return msg.role === "assistant" ? (
           <AssistantMessage key={msg.id} msg={msg} />

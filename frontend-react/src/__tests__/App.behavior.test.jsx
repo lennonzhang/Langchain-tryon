@@ -104,6 +104,57 @@ describe("App behavior (session v2)", () => {
     expect(list.textContent).toContain("final answer");
   });
 
+  it("opens sessions sidebar from chat header button", async () => {
+    render(<App />);
+
+    const sidebar = document.getElementById("session-sidebar");
+    expect(sidebar?.classList.contains("is-open")).toBe(false);
+
+    const trigger = screen.getByRole("button", { name: "Open sessions panel" });
+    expect(trigger).toHaveAttribute("aria-controls", "session-sidebar");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(trigger);
+
+    expect(sidebar?.classList.contains("is-open")).toBe(true);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("new chat hides old messages, preserves unsent draft across switching, then clears it after first send", async () => {
+    render(<App />);
+
+    await userEvent.type(await findComposerInput(), "origin session message");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    const messageList = screen.getByTestId("messages-list");
+    expect(await within(messageList).findByText("final answer")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("+ New Chat"));
+    await waitFor(() => {
+      expect(within(messageList).queryByText("final answer")).toBeNull();
+      expect(within(messageList).getByText("Connected. Type your question to start.")).toBeInTheDocument();
+    });
+
+    await userEvent.type(await findComposerInput(), "draft keeps me");
+
+    const sessionList = screen.getByTestId("session-list");
+    const previousSessionTitle = within(sessionList).getByText("origin session message");
+    const previousSessionButton = previousSessionTitle.closest(".session-item");
+    expect(previousSessionButton).toBeTruthy();
+    await userEvent.click(previousSessionButton);
+    expect(await within(messageList).findByText("final answer")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("+ New Chat"));
+    expect((await findComposerInput()).value).toContain("draft keeps me");
+
+    fireEvent.submit(document.querySelector("form.composer"));
+    await within(messageList).findByText("final answer");
+    expect(streamChat).toHaveBeenCalledTimes(2);
+
+    await userEvent.click(screen.getByText("+ New Chat"));
+    expect((await findComposerInput()).value).toBe("");
+  });
+
   it("keeps error UI when stream emits error then done", async () => {
     streamChat.mockImplementationOnce(async (_payload, handlers) => {
       handlers.onEvent({ type: "error", error: "boom" });
@@ -145,6 +196,66 @@ describe("App behavior (session v2)", () => {
     const messageList = screen.getByTestId("messages-list");
     const failedMessageNode = within(messageList).getByText("Error: boom").closest(".msg.assistant.stream");
     expect(failedMessageNode?.querySelector(".typing-dots")).toBeNull();
+  });
+
+  it("folds previous reasoning and expands current reasoning for multi-turn in one session", async () => {
+    streamChat.mockImplementationOnce(async (_payload, handlers) => {
+      handlers.onEvent({ type: "reasoning", content: "First round reasoning" });
+      handlers.onEvent({ type: "token", content: "first answer" });
+      handlers.onEvent({ type: "done" });
+      handlers.onDone?.();
+    });
+    const pending = mockPendingAbortableStream();
+
+    render(<App />);
+    const input = await findComposerInput();
+
+    await userEvent.type(input, "first question");
+    fireEvent.submit(document.querySelector("form.composer"));
+    expect(await screen.findByText("first answer")).toBeInTheDocument();
+
+    await userEvent.clear(await findComposerInput());
+    await userEvent.type(await findComposerInput(), "second question");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    await waitFor(() => expect(pending.getHandlers()).toBeTruthy());
+    await act(async () => {
+      pending.getHandlers().onEvent({ type: "reasoning", content: "Second round reasoning" });
+    });
+
+    const messageList = screen.getByTestId("messages-list");
+    const firstRound = within(messageList).getByText("first answer").closest(".msg.assistant.stream");
+    const secondRound = within(messageList).getByText("Thinking...").closest(".msg.assistant.stream");
+    expect(firstRound?.querySelector(".assistant-section.reasoning")).toHaveClass("is-closed");
+    expect(secondRound?.querySelector(".assistant-section.reasoning")).toHaveClass("is-open");
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await screen.findByText("Ready");
+  });
+
+  it("splits reasoning into paragraphs across agent steps during streaming", async () => {
+    const pending = mockPendingAbortableStream();
+
+    render(<App />);
+    const input = await findComposerInput();
+    await userEvent.type(input, "agent step formatting");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    await waitFor(() => expect(pending.getHandlers()).toBeTruthy());
+    await act(async () => {
+      pending.getHandlers().onEvent({ type: "agent_step_start", step: 1 });
+      pending.getHandlers().onEvent({ type: "reasoning", content: "Planning data gathering steps" });
+      pending.getHandlers().onEvent({ type: "agent_step_start", step: 2 });
+      pending.getHandlers().onEvent({ type: "reasoning", content: "Planning targeted data search" });
+    });
+
+    const messageList = screen.getByTestId("messages-list");
+    const streamNode = within(messageList).getByText("Thinking...").closest(".msg.assistant.stream");
+    const reasoningPanel = within(streamNode).getByTestId("reasoning-panel");
+    expect(reasoningPanel.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await screen.findByText("Ready");
   });
 
   it("blocks sending globally while another session is running", async () => {

@@ -10,12 +10,17 @@ const richBlockFallback = (
   </div>
 );
 
-function StreamMessage({ msg, showTyping }) {
+function StreamMessage({ msg, showTyping, isCurrentRequestMessage = false }) {
   const isStreaming = msg.status === "streaming";
   return (
     <div className={`msg assistant stream${msg.status === "done" ? " stream-done" : ""}`}>
       {msg.search.state !== "hidden" && (
-        <CollapsibleSection title="Search" className="search" defaultOpen={true}>
+        <CollapsibleSection
+          key={`${msg.id}-search-${msg.search.state}`}
+          title="Search"
+          className="search"
+          defaultOpen={msg.search.state === "loading"}
+        >
           <div data-testid="search-panel">
             <div className="assistant-body">
               {msg.search.state === "loading" && (
@@ -60,7 +65,12 @@ function StreamMessage({ msg, showTyping }) {
       )}
 
       {msg.reasoning && (
-        <CollapsibleSection title="Reasoning" className="reasoning" defaultOpen={true}>
+        <CollapsibleSection
+          key={`${msg.id}-reasoning-${isCurrentRequestMessage ? "current" : "history"}`}
+          title="Reasoning"
+          className="reasoning"
+          defaultOpen={isCurrentRequestMessage}
+        >
           <div data-testid="reasoning-panel">
             <ErrorBoundary key={`${msg.id}-reasoning`} fallback={richBlockFallback}>
               <RichBlock className="assistant-body" text={msg.reasoning} streaming={isStreaming} />

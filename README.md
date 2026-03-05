@@ -80,8 +80,17 @@ Open `http://127.0.0.1:8000`.
 - OpenAI Responses constraints:
   - omit top-level `temperature` and `top_p`
   - always include `reasoning` (`effort: "high"` / `"low"`)
+- Stream/upstream error diagnostics use normalized provider detail (`provider`, `protocol`, `type`, optional `status`, `message`); SSE error frames preserve upstream `error.type` when available.
 - Media input: kimi only
 - Search events and reasoning/token streams are shown in dedicated sections.
+- Agent reasoning is formatted into readable paragraphs using step-boundary and text heuristics during streaming.
+- Markdown code blocks provide copy actions and syntax highlighting (highlighting runs after stream completion).
+- `+ New Chat` enters a draft-only view (no immediate session creation).
+- Switching from unsent draft to an existing session preserves draft text; first send from draft creates a real session and clears draft.
+- Composer send button switches to `Stop` while the active session is streaming; when another session is streaming, send remains disabled.
+- `context_usage` is emitted at start and refreshed with a terminal `phase=final` update before `done`.
+- Session sidebar keeps a stable responsive width on desktop/tablet and no longer resizes with long session content.
+- On mobile (`<=600px`), sessions open as a left overlay drawer from the chat header `Sessions` button.
 
 ## 5. Streaming Event Contract
 

@@ -53,6 +53,7 @@ export function useSendMessage({
       try {
         const state = useChatUiStore.getState();
         const currentSessionId = state.activeSessionId;
+        const sourceDraftKey = currentSessionId || NEW_SESSION_KEY;
         const input = state.getDraft(currentSessionId);
         const text = input.trim();
 
@@ -109,13 +110,19 @@ export function useSendMessage({
           search: { state: "hidden", query: "", results: [], error: "" },
           usageLines: [],
           reasoning: "",
+          reasoningStepCursor: 0,
+          reasoningNeedsStepBreak: false,
           answer: "Thinking...",
         };
 
         await repository.appendMessages(sessionId, [userMessage, streamMessage]);
         await syncSessionToCache(queryClient, repository, sessionId);
 
-        useChatUiStore.getState().setDraft(sessionId, "");
+        const store = useChatUiStore.getState();
+        store.setDraft(sessionId, "");
+        if (sourceDraftKey !== sessionId) {
+          store.setDraft(sourceDraftKey, "");
+        }
         clearAttachments();
         useChatUiStore.getState().startRequest(sessionId, requestId);
 

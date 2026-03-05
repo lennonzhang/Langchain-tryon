@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { toSafeHtml } from "../utils/markdown";
+import { ensurePrismLoaded } from "../utils/prism-loader";
 
 const MATHJAX_DEBOUNCE_MS = 500;
 
@@ -14,6 +15,8 @@ const MATHJAX_DEBOUNCE_MS = 500;
 export default function RichBlock({ text, className, streaming = false }) {
   const html = useMemo(() => toSafeHtml(text), [text]);
   const containerRef = useRef(null);
+  const copyResetTimersRef = useRef(new WeakMap());
+  const copyResetTimerIdsRef = useRef(new Set());
 
   // Debounce MathJax typesetting — immediate for completed, delayed for streaming
   const mathJaxTimerRef = useRef(null);
@@ -38,6 +41,92 @@ export default function RichBlock({ text, className, streaming = false }) {
         clearTimeout(mathJaxTimerRef.current);
         mathJaxTimerRef.current = null;
       }
+    };
+  }, [html, streaming]);
+
+  // Code block copy: single delegated listener to avoid per-button churn.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleClick = async (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const btn = target.closest(".code-copy-btn");
+      if (!btn) return;
+
+      const wrapper = btn.closest(".code-block-wrapper");
+      const codeEl = wrapper?.querySelector("code");
+      if (!codeEl) return;
+
+      const previousTimerId = copyResetTimersRef.current.get(btn);
+      if (previousTimerId) {
+        clearTimeout(previousTimerId);
+        copyResetTimerIdsRef.current.delete(previousTimerId);
+      }
+
+      try {
+        await navigator.clipboard.writeText(codeEl.textContent || "");
+        btn.textContent = "Copied!";
+        btn.classList.add("copied");
+        const timerId = setTimeout(() => {
+          btn.textContent = "Copy";
+          btn.classList.remove("copied");
+          copyResetTimerIdsRef.current.delete(timerId);
+          copyResetTimersRef.current.delete(btn);
+        }, 2000);
+        copyResetTimersRef.current.set(btn, timerId);
+        copyResetTimerIdsRef.current.add(timerId);
+      } catch {
+        /* clipboard not available */
+      }
+    };
+
+    container.addEventListener("click", handleClick);
+
+    return () => {
+      container.removeEventListener("click", handleClick);
+      copyResetTimerIdsRef.current.forEach((timerId) => clearTimeout(timerId));
+      copyResetTimerIdsRef.current.clear();
+      copyResetTimersRef.current = new WeakMap();
+    };
+  }, []);
+
+  // Prism highlighting: skip while streaming, run once after completion.
+  useEffect(() => {
+    if (streaming) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const codeNodes = container.querySelectorAll('pre code[class*="language-"]');
+    if (codeNodes.length === 0) return;
+
+    let cancelled = false;
+
+    const highlightPendingCodeBlocks = () => {
+      if (cancelled || !window.Prism) return;
+      container
+        .querySelectorAll('pre code[class*="language-"]')
+        .forEach((node) => {
+          if (node.dataset.prismHighlighted === "1") return;
+          window.Prism.highlightElement(node);
+          node.dataset.prismHighlighted = "1";
+        });
+    };
+
+    if (window.Prism) {
+      highlightPendingCodeBlocks();
+    } else {
+      ensurePrismLoaded()
+        .then(() => {
+          highlightPendingCodeBlocks();
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      cancelled = true;
     };
   }, [html, streaming]);
 

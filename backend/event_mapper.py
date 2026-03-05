@@ -6,7 +6,12 @@ import queue
 import threading
 import time
 
-from .message_builder import build_messages, context_usage_payload, extract_text
+from .message_builder import (
+    build_messages,
+    context_usage_payload,
+    context_usage_with_completion,
+    extract_text,
+)
 from .model_profile import proxy_env_guard, stream_or_invoke_kwargs
 from .search_provider import SearchProvider
 
@@ -42,6 +47,8 @@ def stream_agentic(
         result_queue.put(event)
 
     search_provider = SearchProvider(run_web_search, _emit_from_agent)
+    base_messages = build_messages(model, message, history, "", [])
+    emitted_token_parts: list[str] = []
 
     def _run_agent():
         try:
@@ -68,7 +75,7 @@ def stream_agentic(
         "usage": context_usage_payload(
             model,
             "agent",
-            build_messages(model, message, history, "", []),
+            base_messages,
         ),
     }
 
@@ -83,6 +90,8 @@ def stream_agentic(
         except queue.Empty:
             continue
         if isinstance(evt, dict) and evt.get("type"):
+            if evt.get("type") == "token":
+                emitted_token_parts.append(str(evt.get("content") or ""))
             yield evt
 
     if state["error"] is not None:
@@ -91,6 +100,15 @@ def stream_agentic(
         return
 
     # Token events have already been streamed by the agent graph.
+    yield {
+        "type": "context_usage",
+        "usage": context_usage_with_completion(
+            model,
+            "final",
+            base_messages,
+            "".join(emitted_token_parts),
+        ),
+    }
     yield {"type": "done", "finish_reason": "stop"}
 
 
@@ -105,6 +123,7 @@ def stream_direct(
     stream_kwargs = stream_or_invoke_kwargs(model, thinking_mode)
 
     has_tokens = False
+    emitted_tokens: list[str] = []
 
     with proxy_env_guard():
         yield {
@@ -121,11 +140,24 @@ def stream_direct(
             token = extract_text(getattr(chunk, "content", ""))
             if token:
                 has_tokens = True
+                emitted_tokens.append(token)
                 yield {"type": "token", "content": token}
 
     if not has_tokens:
+        fallback = "(Model returned no visible answer. Try disabling thinking mode.)"
         yield {
             "type": "token",
-            "content": "(Model returned no visible answer. Try disabling thinking mode.)",
+            "content": fallback,
         }
+        emitted_tokens.append(fallback)
+
+    yield {
+        "type": "context_usage",
+        "usage": context_usage_with_completion(
+            model,
+            "final",
+            messages,
+            "".join(emitted_tokens),
+        ),
+    }
     yield {"type": "done", "finish_reason": "stop"}

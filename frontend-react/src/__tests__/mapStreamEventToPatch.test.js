@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapStreamEventToPatch } from "../features/chat/mapStreamEventToPatch";
+import { mapStreamEventToPatch, mergeReasoningChunk } from "../features/chat/mapStreamEventToPatch";
 
 function baseMessage() {
   return {
@@ -9,6 +9,8 @@ function baseMessage() {
     search: { state: "hidden", query: "", results: [], error: "" },
     usageLines: [],
     reasoning: "",
+    reasoningStepCursor: 0,
+    reasoningNeedsStepBreak: false,
     answer: "Thinking...",
   };
 }
@@ -49,6 +51,101 @@ describe("mapStreamEventToPatch", () => {
     expect(msg.reasoning).toBe("step-1 step-2");
   });
 
+  it("adds a space between merged alphanumeric chunks", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "ratios" });
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "Planning targeted data search" });
+    expect(msg.reasoning).toBe("ratios Planning targeted data search");
+  });
+
+  it("adds a paragraph break before markdown block starts", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "Assessing data sufficiency" });
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "****Planning data retrieval and estimation" });
+    expect(msg.reasoning).toBe("Assessing data sufficiency\n\n****Planning data retrieval and estimation");
+  });
+
+  it("splits step-like reasoning chunks into separate paragraphs", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "Planning data gathering steps" });
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "Planning deeper data search" });
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "Reporting insufficient data availability" });
+
+    expect(msg.reasoning).toBe(
+      "Planning data gathering steps\n\nPlanning deeper data search\n\nReporting insufficient data availability",
+    );
+  });
+
+  it("inserts paragraph break between reasoning chunks when step advances", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, { type: "agent_step_start", step: 1 });
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "Planning data gathering steps" });
+    msg = mapStreamEventToPatch(msg, { type: "agent_step_start", step: 2 });
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "Planning targeted data search" });
+    expect(msg.reasoning).toBe("Planning data gathering steps\n\nPlanning targeted data search");
+  });
+
+  it("does not add duplicate paragraph breaks for repeated step events", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, { type: "agent_step_start", step: 1 });
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "Planning data gathering steps" });
+    msg = mapStreamEventToPatch(msg, { type: "agent_step_start", step: 2 });
+    msg = mapStreamEventToPatch(msg, { type: "agent_step_start", step: 2 });
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "Planning targeted data search" });
+    expect(msg.reasoning).toBe("Planning data gathering steps\n\nPlanning targeted data search");
+    expect(msg.reasoning.includes("\n\n\n\n")).toBe(false);
+  });
+
+  it("splits sticky step keywords within a single chunk", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, {
+      type: "reasoning",
+      content: "Planning data gathering stepsPlanning targeted data search",
+    });
+    expect(msg.reasoning).toBe("Planning data gathering steps\n\nPlanning targeted data search");
+  });
+
+  it("splits sticky markdown block starts within a single chunk", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, {
+      type: "reasoning",
+      content: "Summarizing income data limitations****Confirming data insufficiency",
+    });
+    expect(msg.reasoning).toBe("Summarizing income data limitations\n\n****Confirming data insufficiency");
+  });
+
+  it("keeps existing whitespace/newline without extra insertion", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "line-1\n" });
+    msg = mapStreamEventToPatch(msg, { type: "reasoning", content: "line-2" });
+    expect(msg.reasoning).toBe("line-1\nline-2");
+  });
+
+  it("overrides usage lines when phase is final", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, {
+      type: "context_usage",
+      usage: {
+        phase: "single",
+        used_estimated_tokens: 100,
+        window_total_tokens: 1000,
+        usage_ratio: 0.1,
+      },
+    });
+    msg = mapStreamEventToPatch(msg, {
+      type: "context_usage",
+      usage: {
+        phase: "final",
+        used_estimated_tokens: 220,
+        window_total_tokens: 1000,
+        usage_ratio: 0.22,
+      },
+    });
+
+    expect(msg.usageLines).toHaveLength(1);
+    expect(msg.usageLines[0]).toContain("[final] 220/1000 tokens (22.00%)");
+  });
+
   it("accumulates token chunks and finalizes done", () => {
     let msg = baseMessage();
     msg = mapStreamEventToPatch(msg, { type: "token", content: "Hello" });
@@ -76,5 +173,11 @@ describe("mapStreamEventToPatch", () => {
     msg = mapStreamEventToPatch(msg, { type: "done", finish_reason: "error" });
     expect(msg.status).toBe("failed");
     expect(msg.answer).toBe("Error: boom");
+  });
+});
+
+describe("mergeReasoningChunk", () => {
+  it("does not force spaces between CJK chunks", () => {
+    expect(mergeReasoningChunk("\u4E2D\u6587", "\u7EE7\u7EED")).toBe("\u4E2D\u6587\u7EE7\u7EED");
   });
 });

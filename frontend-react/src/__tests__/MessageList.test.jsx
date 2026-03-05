@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import MessageList from "../components/MessageList";
 
-function buildStreamMessage({ id, requestId, status, answer }) {
+function buildStreamMessage({ id, requestId, status, answer, reasoning = "" }) {
   return {
     id,
     requestId,
@@ -10,7 +10,7 @@ function buildStreamMessage({ id, requestId, status, answer }) {
     status,
     search: { state: "hidden", query: "", results: [], error: "" },
     usageLines: [],
-    reasoning: "",
+    reasoning,
     answer,
   };
 }
@@ -85,5 +85,57 @@ describe("MessageList typing indicator", () => {
 
     expect(doneMsg?.classList.contains("stream-done")).toBe(true);
     expect(streamingMsg?.classList.contains("stream-done")).toBe(false);
+  });
+
+  it("expands current request reasoning and folds previous rounds in same session", () => {
+    const messages = [
+      buildStreamMessage({
+        id: "m1",
+        requestId: "req-1",
+        status: "done",
+        answer: "Answer 1",
+        reasoning: "Reasoning 1",
+      }),
+      buildStreamMessage({
+        id: "m2",
+        requestId: "req-2",
+        status: "streaming",
+        answer: "Thinking...",
+        reasoning: "Reasoning 2",
+      }),
+    ];
+
+    render(<MessageList messages={messages} isPending={true} currentRequestId="req-2" />);
+
+    const round1 = screen.getByText("Answer 1").closest(".msg.assistant.stream");
+    const round2 = screen.getByText("Thinking...").closest(".msg.assistant.stream");
+    expect(round1?.querySelector(".assistant-section.reasoning")).toHaveClass("is-closed");
+    expect(round2?.querySelector(".assistant-section.reasoning")).toHaveClass("is-open");
+  });
+
+  it("keeps latest round reasoning expanded when stream finishes", () => {
+    const messages = [
+      buildStreamMessage({
+        id: "m1",
+        requestId: "req-1",
+        status: "done",
+        answer: "Answer 1",
+        reasoning: "Reasoning 1",
+      }),
+      buildStreamMessage({
+        id: "m2",
+        requestId: "req-2",
+        status: "done",
+        answer: "Answer 2",
+        reasoning: "Reasoning 2",
+      }),
+    ];
+
+    render(<MessageList messages={messages} isPending={false} currentRequestId={null} />);
+
+    const round1 = screen.getByText("Answer 1").closest(".msg.assistant.stream");
+    const round2 = screen.getByText("Answer 2").closest(".msg.assistant.stream");
+    expect(round1?.querySelector(".assistant-section.reasoning")).toHaveClass("is-closed");
+    expect(round2?.querySelector(".assistant-section.reasoning")).toHaveClass("is-open");
   });
 });

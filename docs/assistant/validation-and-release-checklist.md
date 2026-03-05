@@ -20,6 +20,13 @@ pnpm run build
 - Keep `AGENTS.md` and `CLAUDE.md` as thin entry pages with correct links.
 - Add a detailed `CHANGELOG.md` entry.
 - Update `README.md` if user-facing behavior changed.
+- Verify markdown code blocks still render wrapper UI, support copy interaction, and highlight after stream completion.
+- Verify `+ New Chat` draft mode does not show previous session messages and preserves unsent draft across session switches.
+- Verify composer submit button switches to `Stop` only for the active running session; other sessions remain send-disabled.
+- Verify session delete action is visible at card bottom-right and remains disabled for running sessions.
+- Verify sidebar remains fixed-responsive width on desktop/tablet and long session text does not resize sidebar width.
+- Verify mobile (`<=600px`) sessions drawer opens from chat header button and closes via backdrop/select/new-chat actions.
+- Verify agent reasoning streams are paragraph-separated across steps (`agent_step_start`) and sticky in-chunk step text is split for readability.
 
 ## Contract Safety Checklist
 

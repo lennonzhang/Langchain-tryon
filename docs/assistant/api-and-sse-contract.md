@@ -49,6 +49,7 @@ Fields:
 
 - Every event includes `v: 1`.
 - Include `request_id` when available.
+- `context_usage` can appear multiple times; normal completion emits terminal `phase: "final"` before `done(stop)`.
 - Error invariant: `error` must be followed by `done` with `finish_reason: "error"`.
 - Agent timeout: `600s` soft deadline; if exceeded, emit `error` then `done(error)`.
 - Do not silently rename SSE event names.

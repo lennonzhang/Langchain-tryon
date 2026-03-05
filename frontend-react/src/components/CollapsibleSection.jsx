@@ -1,6 +1,11 @@
 import { useState } from "react";
 
-export default function CollapsibleSection({ title, className, children, defaultOpen = true }) {
+export default function CollapsibleSection({
+  title,
+  className,
+  children,
+  defaultOpen = true,
+}) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (

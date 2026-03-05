@@ -61,7 +61,8 @@
 
 - Proxy base URLs default to `claude2.sssaicode.com` and are configurable by env.
 - Provider credential resolution supports provider-specific env names and compatibility fallbacks (for example: `CLAUDE_CLIENT_TOKEN_1`).
-- Upstream errors are normalized by `backend/provider_event_normalizer.py` into a consistent shape like `provider=X | protocol=Y | status=Z | message=...`.
+- Upstream errors are normalized by `backend/provider_event_normalizer.py` into a consistent shape like `provider=X | protocol=Y | type=T | status=Z | message=...`.
+- Provider stream (`SSE`) error frames are normalized with the same detail format; preserve upstream `error.type` when present.
 
 ## Related
 

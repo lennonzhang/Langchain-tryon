@@ -336,7 +336,34 @@ class TestProxyChatModel(unittest.TestCase):
         msg = str(ctx.exception)
         self.assertIn("provider=openai", msg)
         self.assertIn("protocol=openai_responses", msg)
+        self.assertIn("type=request_error", msg)
         self.assertIn("boom", msg)
+
+    def test_openai_invoke_event_error_is_normalized(self):
+        lines = [
+            b'data: {"type":"error","error":{"type":"request_error","message":"invoke boom"}}\n',
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with (
+            patch(
+                "backend.proxy_chat_model.request.urlopen",
+                return_value=_FakeHttpResponse(b"", lines=lines),
+            ),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            model.invoke([HumanMessage(content="hi")])
+
+        msg = str(ctx.exception)
+        self.assertIn("provider=openai", msg)
+        self.assertIn("protocol=openai_responses", msg)
+        self.assertIn("type=request_error", msg)
+        self.assertIn("invoke boom", msg)
 
     def test_json_post_empty_body_raises_diagnostic(self):
         with (

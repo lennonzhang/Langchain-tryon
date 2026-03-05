@@ -33,6 +33,25 @@ def _detail_from_exception(model_id: str, exc: Exception) -> str:
     return normalized_error_detail(info)
 
 
+def _detail_from_stream_error_event(
+    model_id: str,
+    event: dict[str, Any],
+    default_message: str = "upstream stream error",
+) -> str:
+    """Normalize provider stream error payloads while preserving upstream type/message."""
+    raw = json.dumps(event, ensure_ascii=False)
+    info = normalize_upstream_error(model_id, raw_body=raw)
+
+    if not info.message or info.message == raw:
+        nested = event.get("error")
+        if isinstance(nested, dict):
+            info.message = str(nested.get("message") or default_message)
+        else:
+            info.message = str(event.get("message") or default_message)
+
+    return normalized_error_detail(info)
+
+
 def _json_post(
     url: str,
     headers: dict[str, str],
@@ -364,9 +383,7 @@ class ProxyGatewayChatModel(BaseChatModel):
                                     ),
                                 )
                     elif etype == "error":
-                        err = event.get("error", {}) if isinstance(event.get("error"), dict) else {}
-                        msg = str(err.get("message") or "upstream stream error")
-                        raise RuntimeError(msg)
+                        raise RuntimeError(_detail_from_stream_error_event(f"anthropic/{self.model}", event))
         except error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="ignore")
             info = normalize_upstream_error(
@@ -487,8 +504,13 @@ class ProxyGatewayChatModel(BaseChatModel):
                     if etype == "response.completed":
                         completed_data = event.get("response", {})
                     elif etype == "error":
-                        err = event.get("error", {}) if isinstance(event.get("error"), dict) else {}
-                        raise RuntimeError(str(err.get("message") or "upstream error"))
+                        raise RuntimeError(
+                            _detail_from_stream_error_event(
+                                f"openai/{self.model}",
+                                event,
+                                default_message="upstream error",
+                            ),
+                        )
         except error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="ignore")
             info = normalize_upstream_error(f"openai/{self.model}", status=getattr(exc, "code", None), raw_body=raw)
@@ -569,9 +591,7 @@ class ProxyGatewayChatModel(BaseChatModel):
                                             if isinstance(txt, str) and txt:
                                                 yield ChatGenerationChunk(message=AIMessageChunk(content=txt))
                     elif etype == "error":
-                        err = event.get("error", {}) if isinstance(event.get("error"), dict) else {}
-                        msg = str(err.get("message") or "upstream stream error")
-                        raise RuntimeError(msg)
+                        raise RuntimeError(_detail_from_stream_error_event(f"openai/{self.model}", event))
         except error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="ignore")
             info = normalize_upstream_error(
@@ -695,9 +715,7 @@ class ProxyGatewayChatModel(BaseChatModel):
                         continue
 
                     if chunk_data.get("error"):
-                        err = chunk_data["error"]
-                        msg = str(err.get("message") or "upstream stream error") if isinstance(err, dict) else str(err)
-                        raise RuntimeError(msg)
+                        raise RuntimeError(_detail_from_stream_error_event(f"google/{self.model}", chunk_data))
 
                     for candidate in chunk_data.get("candidates", []):
                         if not isinstance(candidate, dict):

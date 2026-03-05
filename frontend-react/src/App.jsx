@@ -34,6 +34,7 @@ function AppContent() {
   const draftsBySessionId = useChatUiStore((state) => state.draftsBySessionId);
   const requestIdBySessionId = useChatUiStore((state) => state.requestIdBySessionId);
   const toggleSidebar = useChatUiStore((state) => state.toggleSidebar);
+  const setSidebarOpen = useChatUiStore((state) => state.setSidebarOpen);
   const setFilter = useChatUiStore((state) => state.setFilter);
   const setActiveSessionId = useChatUiStore((state) => state.setActiveSessionId);
   const setDraft = useChatUiStore((state) => state.setDraft);
@@ -52,7 +53,8 @@ function AppContent() {
   }, [activeSessionId, sessions, setActiveSessionId]);
 
   const activeSessionQuery = useSessionDetailQuery(activeSessionId);
-  const activeSession = activeSessionQuery.data;
+  const isDraftSession = activeSessionId === NEW_SESSION_KEY;
+  const activeSession = isDraftSession ? null : activeSessionQuery.data;
 
   const deleteSessionMutation = useDeleteSessionMutation();
 
@@ -80,6 +82,7 @@ function AppContent() {
   const messages = activeSession?.messages?.length
     ? activeSession.messages
     : [{ id: "connected", role: "assistant", content: CONNECTED_TEXT }];
+  const isSessionDetailLoading = !isDraftSession && activeSessionQuery.isLoading;
 
   const handleMessagesScroll = useCallback((event) => {
     const el = event?.currentTarget || messagesRef.current;
@@ -89,6 +92,8 @@ function AppContent() {
   }, []);
 
   const handleToggleSidebar = useCallback(() => toggleSidebar(), [toggleSidebar]);
+  const handleOpenSidebar = useCallback(() => setSidebarOpen(true), [setSidebarOpen]);
+  const handleCloseSidebar = useCallback(() => setSidebarOpen(false), [setSidebarOpen]);
   const handleCreateNew = useCallback(() => setActiveSessionId(NEW_SESSION_KEY), [setActiveSessionId]);
   const handleSelectSession = useCallback((id) => setActiveSessionId(id), [setActiveSessionId]);
   const handleDeleteSession = useCallback(async (sessionId) => {
@@ -118,6 +123,7 @@ function AppContent() {
         filter={filter}
         isOpen={sidebarOpen}
         onToggle={handleToggleSidebar}
+        onClose={handleCloseSidebar}
         onFilterChange={setFilter}
         onCreateNew={handleCreateNew}
         onSelect={handleSelectSession}
@@ -127,14 +133,20 @@ function AppContent() {
       <div className="chat">
         <header className="header">
           <div className="header-main">
-            <div className="header-kicker">LangChain + NVIDIA</div>
-            <h1>Streaming Chat Studio</h1>
-            <p>Conversation workspace with session history.</p>
-          </div>
-          <div className="header-meta">
-            <span className="meta-pill">SSE Streaming</span>
-            <span className="meta-pill">Session History</span>
-            <span className="meta-pill">Robust Tests</span>
+            <button
+              type="button"
+              className="header-sessions-btn"
+              onClick={handleOpenSidebar}
+              aria-controls="session-sidebar"
+              aria-expanded={sidebarOpen}
+              aria-label="Open sessions panel"
+            >
+              Sessions
+            </button>
+            <div className="header-copy">
+              <h1>Chat Workspace</h1>
+              <p>Session-based streaming chat.</p>
+            </div>
           </div>
         </header>
 
@@ -147,11 +159,6 @@ function AppContent() {
                 ? "Generating response..."
                 : "Response running in another session. Open it to stop."}
           </span>
-          {isActiveRunningSession && (
-            <button type="button" className="status-stop" onClick={stopActiveSession}>
-              Stop
-            </button>
-          )}
         </div>
 
         <MessageList
@@ -160,7 +167,7 @@ function AppContent() {
           currentRequestId={currentRequestId}
           ref={messagesRef}
           onScroll={handleMessagesScroll}
-          loading={activeSessionQuery.isLoading}
+          loading={isSessionDetailLoading}
         />
 
         <Composer
@@ -180,6 +187,8 @@ function AppContent() {
           input={input}
           onInputChange={(value) => setDraft(activeSessionId, value)}
           isPending={isGlobalPending}
+          showStop={isActiveRunningSession}
+          onStop={stopActiveSession}
           pendingHint={isGlobalPending && !isActiveRunningSession ? "Another session is generating. Open it to stop." : ""}
           onSubmit={onSubmit}
         />

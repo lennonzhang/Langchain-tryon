@@ -72,7 +72,58 @@ describe("SessionList", () => {
     );
 
     expect(screen.getByLabelText("Running Second")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByLabelText("Delete Second")).toBeDisabled();
     expect(screen.getByLabelText("Delete First")).not.toBeDisabled();
+  });
+
+  it("does not render Invalid Date tooltip when updatedAt is invalid", () => {
+    render(
+      <SessionList
+        sessions={[
+          {
+            id: "broken",
+            title: "Broken Time",
+            updatedAt: "not-a-date",
+            lastMessagePreview: "preview",
+          },
+        ]}
+        activeSessionId="broken"
+        filter=""
+        onSelect={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+
+    const timeEl = document.querySelector(".session-time");
+    expect(timeEl).toBeTruthy();
+    expect(timeEl?.getAttribute("title")).toBe("");
+  });
+
+  it("keeps long title and preview in fixed text columns", () => {
+    render(
+      <SessionList
+        sessions={[
+          {
+            id: "long",
+            title: "A very very very very very long title for width stability",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            lastMessagePreview:
+              "A long assistant preview used to ensure the item still renders under fixed text-column constraints.",
+          },
+        ]}
+        activeSessionId="long"
+        filter=""
+        onSelect={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+
+    const item = document.querySelector(".session-item");
+    const title = document.querySelector(".session-title");
+    const preview = document.querySelector(".session-preview");
+    expect(item?.querySelector(".session-item-top")).toBeTruthy();
+    expect(title).toBeTruthy();
+    expect(preview).toBeTruthy();
   });
 });
