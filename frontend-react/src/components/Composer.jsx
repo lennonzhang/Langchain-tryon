@@ -18,6 +18,7 @@ export default function Composer({
   input,
   onInputChange,
   isPending,
+  pendingHint,
   onSubmit,
 }) {
   return (
@@ -73,7 +74,7 @@ export default function Composer({
             id="input"
             value={input}
             disabled={isPending}
-            placeholder="Press Enter to send (Shift+Enter for newline)"
+            placeholder={pendingHint || "Press Enter to send (Shift+Enter for newline)"}
             required
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={(event) => {

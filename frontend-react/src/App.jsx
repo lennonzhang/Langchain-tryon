@@ -8,7 +8,7 @@ import { AppProviders } from "./app/AppProviders";
 import { useCapabilitiesQuery } from "./features/chat/useCapabilitiesQuery";
 import { useSessionDetailQuery, useSessionListQuery, useDeleteSessionMutation } from "./features/sessions/useSessions";
 import SessionSidebar from "./features/sessions/SessionSidebar";
-import { NEW_SESSION_KEY, useChatUiStore } from "./shared/store/chatUiStore";
+import { NEW_SESSION_KEY, useChatUiStore, selectRunningSessionId } from "./shared/store/chatUiStore";
 import { useSendMessage } from "./features/chat/useSendMessage";
 
 export { shortModelName };
@@ -32,7 +32,6 @@ function AppContent() {
   const filter = useChatUiStore((state) => state.filter);
   const activeSessionId = useChatUiStore((state) => state.activeSessionId);
   const draftsBySessionId = useChatUiStore((state) => state.draftsBySessionId);
-  const pendingBySessionId = useChatUiStore((state) => state.pendingBySessionId);
   const requestIdBySessionId = useChatUiStore((state) => state.requestIdBySessionId);
   const toggleSidebar = useChatUiStore((state) => state.toggleSidebar);
   const setFilter = useChatUiStore((state) => state.setFilter);
@@ -69,14 +68,13 @@ function AppContent() {
 
   const activeKey = activeSessionId || NEW_SESSION_KEY;
   const input = draftsBySessionId[activeKey] || "";
-  const runningSessionId =
-    Object.entries(pendingBySessionId).find(([, pending]) => Boolean(pending))?.[0] || null;
+  const runningSessionId = useChatUiStore(selectRunningSessionId);
   const isGlobalPending = Boolean(runningSessionId);
   const isActiveRunningSession =
     Boolean(activeSessionId) &&
     activeSessionId !== NEW_SESSION_KEY &&
     activeSessionId === runningSessionId;
-  const isPending = isActiveRunningSession;
+  const isSessionStreaming = isActiveRunningSession;
   const currentRequestId =
     activeSessionId && activeSessionId !== NEW_SESSION_KEY ? requestIdBySessionId[activeSessionId] || null : null;
   const messages = activeSession?.messages?.length
@@ -94,6 +92,8 @@ function AppContent() {
   const handleCreateNew = useCallback(() => setActiveSessionId(NEW_SESSION_KEY), [setActiveSessionId]);
   const handleSelectSession = useCallback((id) => setActiveSessionId(id), [setActiveSessionId]);
   const handleDeleteSession = useCallback(async (sessionId) => {
+    // Data-layer guard: prevent deleting a session with an active stream.
+    if (useChatUiStore.getState().pendingBySessionId[sessionId]) return;
     await deleteSessionMutation.mutateAsync(sessionId);
     if (useChatUiStore.getState().activeSessionId === sessionId) {
       setActiveSessionId(null);
@@ -110,7 +110,7 @@ function AppContent() {
   }, [messages]);
 
   return (
-    <div className={`app-shell ${isGlobalPending ? "is-pending" : ""}`}>
+    <div className="app-shell">
       <SessionSidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -156,7 +156,7 @@ function AppContent() {
 
         <MessageList
           messages={messages}
-          isPending={isPending}
+          isPending={isSessionStreaming}
           currentRequestId={currentRequestId}
           ref={messagesRef}
           onScroll={handleMessagesScroll}
@@ -180,6 +180,7 @@ function AppContent() {
           input={input}
           onInputChange={(value) => setDraft(activeSessionId, value)}
           isPending={isGlobalPending}
+          pendingHint={isGlobalPending && !isActiveRunningSession ? "Another session is generating. Open it to stop." : ""}
           onSubmit={onSubmit}
         />
       </div>

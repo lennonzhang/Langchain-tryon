@@ -38,15 +38,19 @@ export const useChatUiStore = create((set, get) => ({
     })),
 
   finishRequest: (sessionId) =>
-    set((state) => ({
-      pendingBySessionId: { ...state.pendingBySessionId, [sessionId]: false },
-    })),
+    set((state) => {
+      const { [sessionId]: _, ...rest } = state.pendingBySessionId;
+      return { pendingBySessionId: rest };
+    }),
 
   failRequest: (sessionId, errorText) =>
-    set((state) => ({
-      pendingBySessionId: { ...state.pendingBySessionId, [sessionId]: false },
-      lastErrorBySessionId: { ...state.lastErrorBySessionId, [sessionId]: errorText },
-    })),
+    set((state) => {
+      const { [sessionId]: _, ...rest } = state.pendingBySessionId;
+      return {
+        pendingBySessionId: rest,
+        lastErrorBySessionId: { ...state.lastErrorBySessionId, [sessionId]: errorText },
+      };
+    }),
 
   isCurrentRequest: (sessionId, requestId) => get().requestIdBySessionId[sessionId] === requestId,
 
@@ -61,3 +65,11 @@ export const useChatUiStore = create((set, get) => ({
       lastErrorBySessionId: {},
     }),
 }));
+
+export function hasGlobalPending(pendingBySessionId) {
+  return Object.values(pendingBySessionId || {}).some(Boolean);
+}
+
+export function selectRunningSessionId(state) {
+  return Object.entries(state.pendingBySessionId).find(([, v]) => v)?.[0] || null;
+}

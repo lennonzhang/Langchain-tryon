@@ -25,12 +25,12 @@ describe("chatUiStore", () => {
     expect(useChatUiStore.getState().isCurrentRequest("s1", "r1")).toBe(true);
 
     store.finishRequest("s1");
-    expect(useChatUiStore.getState().pendingBySessionId.s1).toBe(false);
+    expect(useChatUiStore.getState().pendingBySessionId.s1).toBeUndefined();
 
     store.startRequest("s1", "r2");
     store.failRequest("s1", "boom");
     expect(useChatUiStore.getState().lastErrorBySessionId.s1).toBe("boom");
-    expect(useChatUiStore.getState().pendingBySessionId.s1).toBe(false);
+    expect(useChatUiStore.getState().pendingBySessionId.s1).toBeUndefined();
   });
 
   it("rejects stale request id", () => {

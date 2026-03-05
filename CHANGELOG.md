@@ -2,6 +2,31 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-05 (Progressive Disclosure Docs Refactor: AGENTS + CLAUDE)
+
+### Summary
+
+Reorganized assistant-facing documentation into a 3-layer progressive disclosure structure with a shared single source of truth. Behavior contracts are unchanged.
+
+### Documentation Structure
+
+- Added shared L2/L3 documentation under `docs/assistant/`:
+  - `runtime-and-commands.md`
+  - `api-and-sse-contract.md`
+  - `model-and-provider-policy.md`
+  - `architecture-rules.md`
+  - `path-index.md`
+  - `validation-and-release-checklist.md`
+- Converted `AGENTS.md` to a thin L1 entry page with hard constraints and navigation links.
+- Converted `CLAUDE.md` to a thin L1 entry page with command quickstart, troubleshooting pointers, and navigation links.
+
+### Contract and Behavior
+
+- No runtime API behavior changed.
+- No SSE event names changed.
+- No model policy implementation changed.
+- Existing invariants remain intact (including `error -> done(error)` sequence).
+
 ## 2026-03-04 (Frontend Stream Terminal Consistency + Race Hardening)
 
 ### Summary

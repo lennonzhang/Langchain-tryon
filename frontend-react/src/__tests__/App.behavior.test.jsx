@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, { shortModelName } from "../App";
 import { useChatUiStore } from "../shared/store/chatUiStore";
+import { MemorySessionRepository } from "../entities/session/memorySessionRepository";
 
 const fetchCapabilities = vi.fn();
 const streamChat = vi.fn();
@@ -76,8 +77,14 @@ describe("App behavior (session v2)", () => {
     global.URL.revokeObjectURL = vi.fn();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   async function findComposerInput() {
-    return screen.findByPlaceholderText("Press Enter to send (Shift+Enter for newline)");
+    // Placeholder changes when another session is streaming, so match flexibly.
+    await waitFor(() => expect(document.getElementById("input")).toBeTruthy());
+    return document.getElementById("input");
   }
 
   it("exports shortModelName helper", () => {
@@ -264,5 +271,59 @@ describe("App behavior (session v2)", () => {
     const messageList = screen.getByTestId("messages-list");
     expect(await within(messageList).findByText("race-done-error")).toBeInTheDocument();
     expect(within(messageList).queryByText("Error: transport boom")).toBeNull();
+  });
+
+  it("releases pending lock when repository throws during finalization", async () => {
+    streamChat.mockImplementationOnce(async (_payload, handlers) => {
+      handlers.onEvent({ type: "token", content: "before-crash" });
+      handlers.onEvent({ type: "done" });
+      handlers.onDone?.();
+    });
+
+    const origUpdate = MemorySessionRepository.prototype.updateMessage;
+    let callCount = 0;
+    vi.spyOn(MemorySessionRepository.prototype, "updateMessage").mockImplementation(
+      async function (...args) {
+        callCount++;
+        // First call patches the token event; second call is finalization — make it throw.
+        if (callCount === 2) throw new Error("repo crash");
+        return origUpdate.apply(this, args);
+      },
+    );
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "repo fail test");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    // Pending lock should be released despite the repository error.
+    await waitFor(() => {
+      expect(screen.getByText("Ready")).toBeInTheDocument();
+    });
+
+    MemorySessionRepository.prototype.updateMessage.mockRestore();
+  });
+
+  it("prevents deleting a streaming session even when UI disable is bypassed", async () => {
+    mockPendingAbortableStream();
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "protect this session");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+
+    const sessionList = screen.getByTestId("session-list");
+    const deleteBtn = within(sessionList).getByRole("button", { name: /^Delete/ });
+    expect(deleteBtn).toBeDisabled();
+
+    // Simulate bypassing disabled UI and clicking delete directly.
+    deleteBtn.removeAttribute("disabled");
+    await userEvent.click(deleteBtn);
+
+    // Data-layer guard should still keep the running session intact.
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(within(screen.getByTestId("session-list")).getAllByRole("button", { name: /^Delete/ })).toHaveLength(1);
   });
 });

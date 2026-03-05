@@ -1,10 +1,10 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { shortModelName } from "../../utils/models";
 import { nextId, nextRequestId } from "../../shared/lib/id";
 import { useSessionRepository } from "../sessions/sessionRepositoryContext";
 import { SESSION_LIST_QUERY_KEY, sessionDetailQueryKey } from "../sessions/useSessions";
-import { NEW_SESSION_KEY, useChatUiStore } from "../../shared/store/chatUiStore";
+import { NEW_SESSION_KEY, useChatUiStore, hasGlobalPending } from "../../shared/store/chatUiStore";
 import { buildSessionTitle } from "../../entities/session/sessionSummary";
 import { toApiHistory } from "./history";
 import { useStreamController } from "./useStreamController";
@@ -26,10 +26,6 @@ function patchStreamMessageInCache(queryClient, sessionId, streamId, event) {
       msg.id === streamId ? mapStreamEventToPatch(msg, event) : msg
     ),
   });
-}
-
-function hasGlobalPending(pendingBySessionId) {
-  return Object.values(pendingBySessionId || {}).some(Boolean);
 }
 
 export function useSendMessage({
@@ -132,46 +128,59 @@ export function useSendMessage({
           finalized = true;
 
           if (!useChatUiStore.getState().isCurrentRequest(sessionId, requestId)) {
+            // Request is stale (e.g. store reset during HMR/unmount).
+            // Still finalize the message in the repository to avoid stuck "streaming" status.
+            try {
+              await repository.updateMessage(sessionId, streamId, (msg) => {
+                if (msg.status !== "streaming") return msg;
+                return { ...msg, status: "done", answer: msg.answer || "(stale)" };
+              });
+            } catch { /* best-effort */ }
             return;
           }
 
-          const errorText = payload.errorText || terminalErrorText;
-          if (cause === "error" || (cause === "done" && errorText)) {
-            const finalErrorText = errorText || "Request failed";
-            await repository.updateMessage(sessionId, streamId, (message) => {
-              if (message.status !== "streaming") return message;
-              return {
-                ...message,
-                status: "failed",
-                answer: `Error: ${finalErrorText}`,
-              };
-            });
-            await syncSessionToCache(queryClient, repository, sessionId);
-            useChatUiStore.getState().failRequest(sessionId, finalErrorText);
-            return;
-          }
+          try {
+            const errorText = payload.errorText || terminalErrorText;
+            if (cause === "error" || (cause === "done" && errorText)) {
+              const finalErrorText = errorText || "Request failed";
+              await repository.updateMessage(sessionId, streamId, (message) => {
+                if (message.status !== "streaming") return message;
+                return {
+                  ...message,
+                  status: "failed",
+                  answer: `Error: ${finalErrorText}`,
+                };
+              });
+              await syncSessionToCache(queryClient, repository, sessionId);
+              useChatUiStore.getState().failRequest(sessionId, finalErrorText);
+              return;
+            }
 
-          if (cause === "aborted") {
+            if (cause === "aborted") {
+              await repository.updateMessage(sessionId, streamId, (msg) => {
+                if (msg.status !== "streaming") return msg;
+                const answer =
+                  msg.answer && msg.answer !== "Thinking..."
+                    ? msg.answer
+                    : "Canceled by user.";
+                return { ...msg, status: "done", answer };
+              });
+              await syncSessionToCache(queryClient, repository, sessionId);
+              useChatUiStore.getState().finishRequest(sessionId);
+              return;
+            }
+
             await repository.updateMessage(sessionId, streamId, (msg) => {
               if (msg.status !== "streaming") return msg;
-              const answer =
-                msg.answer && msg.answer !== "Thinking..."
-                  ? msg.answer
-                  : "Canceled by user.";
+              const answer = !msg.answer || msg.answer === "Thinking..." ? "(empty response)" : msg.answer;
               return { ...msg, status: "done", answer };
             });
             await syncSessionToCache(queryClient, repository, sessionId);
             useChatUiStore.getState().finishRequest(sessionId);
-            return;
+          } catch {
+            // Guarantee pending lock release even if repository/cache operations fail.
+            useChatUiStore.getState().finishRequest(sessionId);
           }
-
-          await repository.updateMessage(sessionId, streamId, (msg) => {
-            if (msg.status !== "streaming") return msg;
-            const answer = !msg.answer || msg.answer === "Thinking..." ? "(empty response)" : msg.answer;
-            return { ...msg, status: "done", answer };
-          });
-          await syncSessionToCache(queryClient, repository, sessionId);
-          useChatUiStore.getState().finishRequest(sessionId);
         };
 
         await startStream({
@@ -228,6 +237,9 @@ export function useSendMessage({
       webSearch,
     ],
   );
+
+  // Abort any running stream on unmount to prevent orphaned pending state.
+  useEffect(() => () => abortStream(), [abortStream]);
 
   const stopActiveSession = useCallback(() => {
     const state = useChatUiStore.getState();
