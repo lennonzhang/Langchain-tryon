@@ -47,3 +47,6 @@ frontend/coverage/
 frontend-react/preview*.log
 frontend-react/test-results/
 frontend-react/playwright-report/
+
+# Local agent/editor settings
+.claude/settings.local.json
