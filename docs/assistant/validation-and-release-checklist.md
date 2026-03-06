@@ -33,7 +33,10 @@ pnpm run build
 - SSE event names are unchanged unless explicitly planned and documented.
 - Error invariant remains `error` then `done(error)`.
 - Request limits remain documented and consistent with schema/handlers.
+- `request_id` limit (`256`) remains enforced consistently in schema, FastAPI gateway, and cancel handlers/routes.
 - Provider routing and model policy remain registry-driven.
+- Provider timeout precedence remains documented and tested: `<PROVIDER>_TIMEOUT_SECONDS` -> `MODEL_TIMEOUT_SECONDS` -> default.
+- If `<PROVIDER>_SSL_VERIFY=false`, warning logging behavior remains intentional and tested.
 
 ## Related
 

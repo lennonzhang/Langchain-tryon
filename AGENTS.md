@@ -14,6 +14,7 @@ Repository-level entry guide for coding agents.
 - All providers must implement real SSE streaming (no fake full-response streaming).
 - Do not silently rename SSE event names.
 - Error flow invariant is mandatory: `error` must be followed by `done` with `finish_reason: "error"`.
+- Web page loading uses `httpx.AsyncClient` + `trafilatura`; `requests`+`bs4` is the fallback. Do not reintroduce `WebBaseLoader`.
 - Update tests and documentation together for behavior changes.
 
 ## Quick Navigation (Progressive Disclosure)
@@ -39,6 +40,7 @@ L3 deep index:
 - Capabilities path: `GET /api/capabilities`
 - Default model: `openai/gpt-5.3-codex`
 - `thinking_mode` default: `true`
+- `request_id` max length: `256`
 - Auto `agent_mode` when omitted: enabled for qwen/glm/claude/codex/gemini, disabled for kimi
 
 ## Documentation Update Rule
@@ -46,6 +48,6 @@ L3 deep index:
 When behavior changes, update:
 
 - shared docs under `docs/assistant/*` (single source of truth),
-- this file and `CLAUDE.md` entry links if needed,
+- this file `AGENTS.md` and `CLAUDE.md` entry links if needed,
 - `CHANGELOG.md`,
 - `README.md` if user-facing behavior changed.

@@ -35,18 +35,41 @@ WEB_LOADER_TIMEOUT_SECONDS=2.0
 WEB_SEARCH_TOTAL_BUDGET_SECONDS=4.0
 WEB_LOADER_MAX_PAGES=3
 WEB_LOADER_CONCURRENCY=3
+GATEWAY_MAX_CONCURRENCY=16
+GATEWAY_MAX_QUEUE_SIZE=64
+GATEWAY_QUEUE_TIMEOUT_SECONDS=15
+MODEL_TIMEOUT_SECONDS=300
 ```
 
-Non-NVIDIA provider env (optional - for Anthropic, OpenAI, Google via sssaicode proxy):
+Non-NVIDIA provider env (optional - for Anthropic, OpenAI, Google via proxy):
 
 ```env
-ANTHROPIC_API_KEY=sk-...        # or CLAUDE_CLIENT_TOKEN_1 / CLAUDE_CLIENT_TOKEN
-OPENAI_API_KEY=sk-...           # or CODEX_TOKEN_1 / CODEX_TOKEN
+ANTHROPIC_API_KEY=...        # or CLAUDE_CLIENT_TOKEN_1 / CLAUDE_CLIENT_TOKEN
+OPENAI_API_KEY=...           # or CODEX_TOKEN_1 / CODEX_TOKEN
 GOOGLE_API_KEY=...              # or GEMINI_API_KEY_1 / GEMINI_API_KEY
-ANTHROPIC_BASE_URL=https://claude2.sssaicode.com/api/v1
-OPENAI_BASE_URL=https://claude2.sssaicode.com/api/v1
-GOOGLE_BASE_URL=https://claude2.sssaicode.com/api/v1beta
+ANTHROPIC_BASE_URL=
+OPENAI_BASE_URL=
+GOOGLE_BASE_URL=
+NVIDIA_BASE_URL=
+ANTHROPIC_TIMEOUT_SECONDS=
+OPENAI_TIMEOUT_SECONDS=
+GOOGLE_TIMEOUT_SECONDS=
+NVIDIA_TIMEOUT_SECONDS=
 ```
+
+Per-provider SSL verification (optional - for third-party proxies with cert issues):
+
+```env
+ANTHROPIC_SSL_VERIFY=false      # disable SSL cert verification for Anthropic requests
+OPENAI_SSL_VERIFY=false         # disable SSL cert verification for OpenAI requests
+GOOGLE_SSL_VERIFY=false         # disable SSL cert verification for Google requests
+```
+
+Timeout precedence:
+
+- `<PROVIDER>_TIMEOUT_SECONDS`
+- `MODEL_TIMEOUT_SECONDS`
+- default `300`
 
 ## 3. Run Locally
 
@@ -67,12 +90,13 @@ Open `http://127.0.0.1:8000`.
 ## 4. Current Product Behavior
 
 - Default chat path: `POST /api/chat/stream`
+- Cancel path: `POST /api/chat/cancel`
 - Capabilities path: `GET /api/capabilities`
 - Models:
   - NVIDIA: `moonshotai/kimi-k2.5`, `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
-  - Anthropic: `anthropic/claude-sonnet-4-6` (via sssaicode proxy)
-  - OpenAI: `openai/gpt-5.3-codex` (default, via sssaicode proxy)
-  - Google: `google/gemini-3-pro-preview` (via sssaicode proxy)
+  - Anthropic: `anthropic/claude-sonnet-4-6` (via proxy)
+  - OpenAI: `openai/gpt-5.3-codex` (default, via proxy)
+  - Google: `google/gemini-3-pro-preview` (via proxy)
 - Agent mode defaults:
   - on: qwen, glm, claude, codex, gemini (if `agent_mode` omitted)
   - off: kimi (if `agent_mode` omitted)
@@ -88,11 +112,17 @@ Open `http://127.0.0.1:8000`.
 - `+ New Chat` enters a draft-only view (no immediate session creation).
 - Switching from unsent draft to an existing session preserves draft text; first send from draft creates a real session and clears draft.
 - Composer send button switches to `Stop` while the active session is streaming; when another session is streaming, send remains disabled.
+- `Stop` first calls `POST /api/chat/cancel`, then aborts the local SSE request so backend cancellation can start immediately.
 - `context_usage` is emitted at start and refreshed with a terminal `phase=final` update before `done`.
 - Session sidebar keeps a stable responsive width on desktop/tablet and no longer resizes with long session content.
 - On mobile (`<=600px`), sessions open as a left overlay drawer from the chat header `Sessions` button.
 
 ## 5. Streaming Event Contract
+
+Request limits:
+
+- JSON body max size: `10 MB`
+- `request_id` max length: `256`
 
 Expected SSE event types:
 
@@ -142,13 +172,18 @@ pnpm test:e2e
 
 Backend:
 
+- `backend/gateway/app.py` (FastAPI gateway + SSE + cancel route)
+- `backend/gateway/admission.py` (gateway concurrency, queue, timeout control)
 - `backend/nvidia_client.py` (facade)
-- `backend/model_registry.py` (capabilities source of truth)
-- `backend/model_profile.py`
-- `backend/proxy_chat_model.py` (multi-provider LangChain adapter)
+- `backend/model_registry.py` (env-driven catalog facade)
+- `backend/model_profile.py` (factory compatibility facade)
+- `backend/proxy_chat_model.py` (thin multi-provider LangChain adapter)
 - `backend/provider_router.py` (registry-driven provider routing)
 - `backend/provider_event_normalizer.py` (upstream error diagnostics)
-- `backend/config.py` (env loading, provider credentials)
+- `backend/config.py` (compat facade over env/provider settings)
+- `backend/domain/*` (model catalog + execution primitives)
+- `backend/application/*` (chat / stream / cancel use cases)
+- `backend/infrastructure/*` (provider settings, factories, protocol + transport adapters)
 - `backend/message_builder.py`
 - `backend/agent_graph.py` (LangGraph agent)
 - `backend/agent_orchestrator.py`
@@ -176,6 +211,7 @@ Deployment:
 - `api/capabilities.py`
 - `api/chat.py`
 - `api/chat/stream.py`
+- `api/chat/cancel.py`
 
 ## 8. Release Notes Policy
 

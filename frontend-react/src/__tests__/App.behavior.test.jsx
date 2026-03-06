@@ -8,10 +8,12 @@ import { MemorySessionRepository } from "../entities/session/memorySessionReposi
 
 const fetchCapabilities = vi.fn();
 const streamChat = vi.fn();
+const cancelChat = vi.fn();
 
 vi.mock("../shared/api/chatApiClient", () => ({
   fetchCapabilities: (...args) => fetchCapabilities(...args),
   streamChat: (...args) => streamChat(...args),
+  cancelChat: (...args) => cancelChat(...args),
 }));
 
 const CAPABILITIES_RESPONSE = {
@@ -60,6 +62,7 @@ describe("App behavior (session v2)", () => {
     vi.clearAllMocks();
     useChatUiStore.getState().reset();
     fetchCapabilities.mockResolvedValue(CAPABILITIES_RESPONSE);
+    cancelChat.mockResolvedValue({ cancelled: true });
     streamChat.mockImplementation(async (_payload, handlers) => {
       handlers.onEvent({ type: "token", content: "final answer" });
       handlers.onEvent({ type: "done" });
@@ -327,6 +330,27 @@ describe("App behavior (session v2)", () => {
 
     expect(await screen.findByText("final answer")).toBeInTheDocument();
     expect(streamChat).toHaveBeenCalledTimes(2);
+  });
+
+  it("stop calls cancel endpoint for the active request", async () => {
+    const pending = mockPendingAbortableStream();
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "cancel request check");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    await waitFor(() => {
+      expect(pending.getHandlers()).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => {
+      expect(cancelChat).toHaveBeenCalledTimes(1);
+    });
+    expect(cancelChat.mock.calls[0][0]).toEqual(expect.any(String));
+    expect(cancelChat.mock.calls[0][0].length).toBeGreaterThan(10);
   });
 
   it("stop without token stores canceled by user", async () => {

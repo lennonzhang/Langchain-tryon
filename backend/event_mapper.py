@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
@@ -16,6 +17,7 @@ from .model_profile import proxy_env_guard, stream_or_invoke_kwargs
 from .search_provider import SearchProvider
 
 _AGENT_TIMEOUT_S = 600  # 10-minute soft timeout for agent thread
+logger = logging.getLogger(__name__)
 
 
 def stream_agentic(
@@ -28,6 +30,8 @@ def stream_agentic(
     run_web_search=None,
     run_agent=None,
     run_react_agent=None,
+    cancel_token=None,
+    event_sink=None,
 ):
     """Yield SSE events for the agentic flow using a background thread."""
     if run_web_search is None:
@@ -44,9 +48,11 @@ def stream_agentic(
     state: dict = {"error": None}
 
     def _emit_from_agent(event: dict):
+        if cancel_token is not None and cancel_token.cancelled:
+            return
         result_queue.put(event)
 
-    search_provider = SearchProvider(run_web_search, _emit_from_agent)
+    search_provider = SearchProvider(run_web_search, _emit_from_agent, cancel_token=cancel_token)
     base_messages = build_messages(model, message, history, "", [])
     emitted_token_parts: list[str] = []
 
@@ -63,6 +69,7 @@ def stream_agentic(
                     event_collector=agent_events,
                     event_emitter=_emit_from_agent,
                     emit_reasoning=emit_reasoning,
+                    cancel_token=cancel_token,
                 )
         except Exception as exc:  # noqa: BLE001
             state["error"] = exc
@@ -81,6 +88,9 @@ def stream_agentic(
 
     deadline = time.monotonic() + _AGENT_TIMEOUT_S
     while worker.is_alive() or not result_queue.empty():
+        if cancel_token is not None and cancel_token.cancelled:
+            yield {"type": "done", "finish_reason": "stop"}
+            return
         if time.monotonic() > deadline:
             yield {"type": "error", "error": "Agent execution timed out"}
             yield {"type": "done", "finish_reason": "error"}
@@ -118,6 +128,7 @@ def stream_direct(
     messages: list[dict],
     thinking_mode: bool,
     emit_reasoning: bool,
+    cancel_token=None,
 ):
     """Yield SSE events for the direct (non-agent) streaming flow."""
     stream_kwargs = stream_or_invoke_kwargs(model, thinking_mode)
@@ -131,17 +142,31 @@ def stream_direct(
             "usage": context_usage_payload(model, "single", messages),
         }
 
-        for chunk in client.stream(messages, **stream_kwargs):
-            additional = getattr(chunk, "additional_kwargs", {}) or {}
-            reasoning = additional.get("reasoning_content")
-            if emit_reasoning and isinstance(reasoning, str) and reasoning:
-                yield {"type": "reasoning", "content": reasoning}
+        stream = client.stream(messages, **stream_kwargs)
+        try:
+            for chunk in stream:
+                if cancel_token is not None and cancel_token.cancelled:
+                    break
+                additional = getattr(chunk, "additional_kwargs", {}) or {}
+                reasoning = additional.get("reasoning_content")
+                if emit_reasoning and isinstance(reasoning, str) and reasoning:
+                    yield {"type": "reasoning", "content": reasoning}
 
-            token = extract_text(getattr(chunk, "content", ""))
-            if token:
-                has_tokens = True
-                emitted_tokens.append(token)
-                yield {"type": "token", "content": token}
+                token = extract_text(getattr(chunk, "content", ""))
+                if token:
+                    has_tokens = True
+                    emitted_tokens.append(token)
+                    yield {"type": "token", "content": token}
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001
+                    logger.warning("Failed to close provider stream cleanly", exc_info=True)
+    if cancel_token is not None and cancel_token.cancelled:
+        yield {"type": "done", "finish_reason": "stop"}
+        return
 
     if not has_tokens:
         fallback = "(Model returned no visible answer. Try disabling thinking mode.)"

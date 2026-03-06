@@ -31,6 +31,7 @@ class ChatRequest:
     _MAX_MESSAGE_CHARS = 100_000
     _MAX_HISTORY_ITEMS = 100
     _MAX_IMAGE_ITEMS = 10
+    _MAX_REQUEST_ID_CHARS = 256
 
     @classmethod
     def from_dict(cls, data: dict) -> ChatRequest:
@@ -69,6 +70,10 @@ class ChatRequest:
         request_id = data.get("request_id")
         if not isinstance(request_id, str) or not request_id.strip():
             request_id = uuid.uuid4().hex
+        elif len(request_id.strip()) > cls._MAX_REQUEST_ID_CHARS:
+            raise ValidationError("request_id", f"too long (max {cls._MAX_REQUEST_ID_CHARS} chars)")
+        else:
+            request_id = request_id.strip()
 
         return cls(
             message=message,

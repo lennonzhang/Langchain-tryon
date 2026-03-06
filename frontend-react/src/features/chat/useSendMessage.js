@@ -253,7 +253,7 @@ export function useSendMessage({
     const activeSessionId = state.activeSessionId;
     if (!activeSessionId || activeSessionId === NEW_SESSION_KEY) return;
     if (!state.pendingBySessionId[activeSessionId]) return;
-    abortStream();
+    void abortStream();
   }, [abortStream]);
 
   return { onSubmit, stopActiveSession };

@@ -100,6 +100,10 @@ class TestChatRequestFromDict(unittest.TestCase):
         req = ChatRequest.from_dict({"request_id": "my-custom-id"})
         self.assertEqual(req.request_id, "my-custom-id")
 
+    def test_request_id_is_trimmed_when_provided(self):
+        req = ChatRequest.from_dict({"request_id": "  my-custom-id  "})
+        self.assertEqual(req.request_id, "my-custom-id")
+
     def test_request_id_empty_string_generates_new(self):
         req = ChatRequest.from_dict({"request_id": "  "})
         self.assertNotEqual(req.request_id.strip(), "")
@@ -108,6 +112,11 @@ class TestChatRequestFromDict(unittest.TestCase):
         req = ChatRequest.from_dict({"request_id": 123})
         self.assertIsInstance(req.request_id, str)
         self.assertTrue(len(req.request_id) > 0)
+
+    def test_request_id_too_long_raises_validation_error(self):
+        with self.assertRaises(ValidationError) as ctx:
+            ChatRequest.from_dict({"message": "hello", "request_id": "r" * 257})
+        self.assertIn("request_id", str(ctx.exception))
 
 
     def test_message_too_long_raises_validation_error(self):

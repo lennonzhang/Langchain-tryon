@@ -5,7 +5,9 @@
 
 ## Source of Truth
 
-- Registry file: `backend/model_registry.py`
+- Canonical model templates: `backend/domain/model_templates.py`
+- Active env-driven catalog: `backend/domain/model_catalog.py`
+- Compatibility facade for legacy callers: `backend/model_registry.py`
 
 ## Supported Models
 
@@ -33,7 +35,8 @@
 - Keep `backend/nvidia_client.py` as the facade.
 - Non-NVIDIA models must route through `ProxyGatewayChatModel`.
 - Routing flow is registry-driven:
-  - `model_registry.py` -> `provider_router.py` -> `model_profile.py`
+  - `domain/model_catalog.py` -> `provider_router.py` -> `infrastructure/chat_model_factory.py`
+  - compatibility facades remain at `model_registry.py` and `model_profile.py`
 
 ## Provider Protocols
 
@@ -59,8 +62,14 @@
 
 ## Proxy and Error Normalization Notes
 
-- Proxy base URLs default to `claude2.sssaicode.com` and are configurable by env.
+- Proxy base URLs are configurable per provider via `<PROVIDER>_BASE_URL` env vars. A built-in default is used when unset.
 - Provider credential resolution supports provider-specific env names and compatibility fallbacks (for example: `CLAUDE_CLIENT_TOKEN_1`).
+- Provider timeout resolution uses:
+  - `<PROVIDER>_TIMEOUT_SECONDS`
+  - fallback `MODEL_TIMEOUT_SECONDS`
+  - fallback default `300`
+- Per-provider SSL verification can be disabled via `<PROVIDER>_SSL_VERIFY=false` (e.g. `ANTHROPIC_SSL_VERIFY=false`). This is useful when routing through third-party proxies with hostname-mismatched certificates.
+- Disabled SSL verification is allowed but logged as a warning at startup/runtime resolution time.
 - Upstream errors are normalized by `backend/provider_event_normalizer.py` into a consistent shape like `provider=X | protocol=Y | type=T | status=Z | message=...`.
 - Provider stream (`SSE`) error frames are normalized with the same detail format; preserve upstream `error.type` when present.
 

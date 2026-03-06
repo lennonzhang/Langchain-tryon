@@ -3,6 +3,13 @@
 **Purpose:** Single source of truth for request shape, limits, and streaming event contract.  
 **When to read:** Before changing handlers, schemas, frontend stream parsing, or event mapping.
 
+## HTTP Endpoints
+
+- `POST /api/chat`
+- `POST /api/chat/stream`
+- `POST /api/chat/cancel`
+- `GET /api/capabilities`
+
 ## Request Payload
 
 Fields:
@@ -20,6 +27,7 @@ Fields:
 
 - JSON body max size: `10 MB` (`413` if exceeded)
 - `message` max length: `100000` chars (`400 ValidationError` if exceeded)
+- `request_id` max length: `256` chars (`400 ValidationError` if exceeded)
 - `history` max items: `100` (silently trimmed)
 - `history` items must be `{role: str, content: str}` (invalid items are filtered out)
 - `images` max items: `10` (silently trimmed)
@@ -51,6 +59,10 @@ Fields:
 - Include `request_id` when available.
 - `context_usage` can appear multiple times; normal completion emits terminal `phase: "final"` before `done(stop)`.
 - Error invariant: `error` must be followed by `done` with `finish_reason: "error"`.
+- User-triggered stop is a normal terminal path:
+  - frontend calls `POST /api/chat/cancel`
+  - backend attempts to cancel the active request
+  - stream ends with `done` and `finish_reason: "stop"`
 - Agent timeout: `600s` soft deadline; if exceeded, emit `error` then `done(error)`.
 - Do not silently rename SSE event names.
 

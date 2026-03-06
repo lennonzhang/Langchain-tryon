@@ -2,6 +2,156 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-06 (Web Loader: httpx async + trafilatura)
+
+### Summary
+
+Replaced LangChain `WebBaseLoader` with `httpx.AsyncClient` (async concurrent fetching, HTTP/2, connection pooling) and `trafilatura` (professional article text extraction). Significantly improves reliability for Chinese sites and other slow endpoints.
+
+### Backend
+
+- **`backend/web_search.py`**: Rewrote page loading pipeline:
+  - Async concurrent fetching via `httpx.AsyncClient` with `asyncio.Semaphore` concurrency control
+  - `trafilatura.extract()` for clean article text extraction (falls back to `bs4` if unavailable)
+  - Browser-level `User-Agent` header for better compatibility
+  - SSL verification fallback (retries with `verify=False` on cert errors)
+  - Increased default timeouts: per-page read 10s (was 2s), total budget 15s (was 4s), connect 5s (new)
+  - Sync wrapper (`_load_pages_sync`) handles both async and sync calling contexts
+  - `load_webpage_content()` signature unchanged for backward compatibility
+- **`requirements.txt`**: Added `httpx>=0.27,<1` and `trafilatura>=2.0,<3`
+
+### Tests
+
+- Updated `tests/test_web_search.py`: Adapted mocks for new httpx/trafilatura pipeline, added extraction fallback tests and async loader test
+
+---
+
+## 2026-03-06 (Launch Risk Hardening Follow-up)
+
+### Summary
+
+Closed the highest-risk backend follow-ups from the FastAPI refactor: request cancellation now survives duplicate `request_id` reuse correctly, gateway request parsing is stricter at the boundary, provider timeout configuration is provider-aware, and search orchestration is routed through `SearchService` instead of being reassembled inside use cases.
+
+### Backend
+
+- Hardened `backend/domain/execution.py`:
+  - `CancellationRegistry.finish()` now removes only the matching token for the active request mapping
+  - duplicate `request_id` reuse no longer lets an older request clear a newer request's cancellation handle
+- Tightened `backend/gateway/app.py` request parsing:
+  - `Content-Length` is checked before reading request bodies
+  - request parsing now uses dedicated gateway exceptions instead of generic runtime exceptions
+  - `request_id` now has a `256` character limit for chat and cancel routes
+- Updated `backend/schemas.py` to enforce the same `request_id` length ceiling at schema level.
+- Updated provider configuration handling:
+  - `backend/infrastructure/provider_settings.py` now resolves timeout via `<PROVIDER>_TIMEOUT_SECONDS` -> `MODEL_TIMEOUT_SECONDS` -> default `300`
+  - disabled `<PROVIDER>_SSL_VERIFY=false` now emits a warning log
+  - `backend/settings/env_loader.py` now avoids re-reading the same `.env` root repeatedly
+- Updated `backend/infrastructure/chat_model_factory.py` to use provider-aware timeout resolution.
+- Routed search orchestration through `backend/application/search_service.py` from `backend/application/chat_use_cases.py` for both one-shot and stream flows.
+- Hardened `backend/event_mapper.py` so provider stream `close()` failures no longer overwrite the original upstream failure.
+- Added lock protection around active catalog initialization in `backend/domain/model_catalog.py`.
+
+### Documentation
+
+- Updated `README.md`
+- Updated `docs/assistant/api-and-sse-contract.md`
+- Updated `docs/assistant/runtime-and-commands.md`
+- Updated `docs/assistant/architecture-rules.md`
+- Updated `docs/assistant/model-and-provider-policy.md`
+- Updated `docs/assistant/path-index.md`
+
+### Validation
+
+- `.\.venv\Scripts\python.exe -m unittest discover -s tests -v` passed (255 tests)
+
+## 2026-03-06 (FastAPI Gateway Refactor + Cancel Endpoint + Analytics)
+
+### Summary
+
+Refactored the backend around a FastAPI gateway and split the old aggregated backend flow into gateway, application, domain, and infrastructure layers. Added a dedicated cancel endpoint so the existing `Stop` control can signal backend cancellation before aborting the local SSE transport. Also integrated Vercel Analytics on the React frontend.
+
+### Backend
+
+- Added `backend/gateway/app.py` as the FastAPI entrypoint for:
+  - `GET /api/capabilities`
+  - `POST /api/chat`
+  - `POST /api/chat/stream`
+  - `POST /api/chat/cancel`
+- Added `backend/gateway/admission.py` for gateway concurrency limits, bounded queueing, and queue timeout control via:
+  - `GATEWAY_MAX_CONCURRENCY`
+  - `GATEWAY_MAX_QUEUE_SIZE`
+  - `GATEWAY_QUEUE_TIMEOUT_SECONDS`
+- Restored path traversal protection for FastAPI static file serving and tightened tests around the gateway route.
+- Split configuration/model concerns:
+  - added `backend/settings/env_loader.py`
+  - added `backend/infrastructure/provider_settings.py`
+  - added `backend/domain/model_templates.py`
+  - added `backend/domain/model_catalog.py`
+- Added execution primitives and use cases:
+  - `backend/domain/execution.py`
+  - `backend/application/chat_use_cases.py`
+  - `backend/application/agent_session_builder.py`
+  - `backend/application/search_service.py`
+- Refactored provider plumbing:
+  - `backend/proxy_chat_model.py` is now a thin adapter
+  - provider-specific request/stream handling moved under `backend/infrastructure/protocols/*`
+  - shared HTTP/SSE transport moved under `backend/infrastructure/transport/*`
+- Kept `backend/nvidia_client.py` as the public facade while delegating runtime orchestration to use cases.
+- Added backend cancellation registry and `cancel_chat(request_id)` facade.
+- Simplified cancel terminal-event delivery so `done(stop)` can pass through the event sink instead of relying only on downstream synthesis.
+- Switched local server runtime to `uvicorn` via `backend/server.py`.
+- Added ASGI Vercel wrappers for the FastAPI app, including `api/chat/cancel.py`.
+
+### Frontend
+
+- Added `cancelChat()` in `frontend-react/src/shared/api/chatApiClient.js`.
+- Updated `useStreamController` so `Stop` first calls `/api/chat/cancel` and then aborts the local fetch.
+- Added Vercel Analytics with `@vercel/analytics/react` in `frontend-react/src/main.jsx`.
+
+### Documentation
+
+- Updated `README.md`
+- Updated `docs/assistant/api-and-sse-contract.md`
+- Updated `docs/assistant/architecture-rules.md`
+- Updated `docs/assistant/runtime-and-commands.md`
+- Updated `CLAUDE.md`
+
+### Validation
+
+- `.\.venv\Scripts\python.exe -m unittest discover -s tests -v` passed (230 tests)
+- `pnpm test` passed in `frontend-react`
+- `pnpm run build` passed in `frontend-react`
+
+## 2026-03-06 (Per-Provider SSL Verification Control)
+
+### Summary
+
+Added per-provider SSL certificate verification control via environment variables, enabling routing through third-party API proxies that have hostname-mismatched or self-signed certificates.
+
+### Backend
+
+- **`backend/config.py`**: Added `provider_ssl_verify(provider)` function reading `<PROVIDER>_SSL_VERIFY` env var (accepts `false`, `0`, `no`; defaults to `true`).
+- **`backend/proxy_chat_model.py`**:
+  - Added `ssl_verify` field to `ProxyGatewayChatModel`
+  - Added `_make_ssl_context()` helper returning an unverified SSL context when `ssl_verify=False`
+  - Added `_urlopen()` instance method for SSL-aware HTTP requests
+  - Updated `_json_post()` to accept `ssl_verify` parameter
+  - All HTTP call sites (invoke + stream for Anthropic, OpenAI, Google) now respect `ssl_verify`
+- **`backend/model_profile.py`**: All `ProxyGatewayChatModel` construction paths now pass `ssl_verify=provider_ssl_verify(provider)`.
+
+### Configuration
+
+- New env variables: `ANTHROPIC_SSL_VERIFY`, `OPENAI_SSL_VERIFY`, `GOOGLE_SSL_VERIFY` (default `true`)
+
+### Documentation
+
+- Updated `docs/assistant/model-and-provider-policy.md` with SSL verification note
+- Updated `README.md` with SSL verification env variables
+
+### Validation
+
+- `python -m unittest discover -s tests -v` passed (210 tests)
+
 ## 2026-03-05 (Session Sidebar Fixed-Responsive Width + Mobile Drawer)
 
 ### Summary
@@ -441,11 +591,11 @@ Fixed issue where previously completed answers would show loading-like visual st
 
 ### Summary
 
-Fixed OpenAI Codex streaming returning 400 from the sssaicode proxy due to invalid request body fields. Expanded test coverage for `proxy_chat_model.py` with 19 new tests covering SSE parsing, provider dispatch, utility functions, and edge cases.
+Fixed OpenAI Codex streaming returning 400 from the proxy due to invalid request body fields. Expanded test coverage for `proxy_chat_model.py` with 19 new tests covering SSE parsing, provider dispatch, utility functions, and edge cases.
 
 ### Bug Fixes
 
-- **P9 (400 error)**: Removed `temperature` and `top_p` from OpenAI Responses API request body - the `/responses` endpoint does not accept these as top-level fields, causing the proxy to reject with `status=400 type=request_error`
+- **P9 (400 error)**: Removed `temperature` and `top_p` from OpenAI Responses API request body - the `/responses` endpoint does not accept these as top-level fields, causing `status=400 type=request_error`
 - **P10 (reasoning required)**: `reasoning` field is now always included in OpenAI requests - proxy requires it. Uses `effort: "high"` when `thinking_mode=True`, `effort: "low"` when `thinking_mode=False`
 
 ### Tests
@@ -468,7 +618,7 @@ Fixed OpenAI Codex streaming returning 400 from the sssaicode proxy due to inval
 
 ### Summary
 
-Added multi-provider backend support for Anthropic Claude Sonnet 4.6, OpenAI GPT-5.3 Codex, and Google Gemini 3 Flash via `ProxyGatewayChatModel`, a LangChain `BaseChatModel` adapter that routes through the sssaicode proxy. All three providers now support real SSE streaming, agent tool-calling, and normalized error diagnostics.
+Added multi-provider backend support for Anthropic Claude Sonnet 4.6, OpenAI GPT-5.3 Codex, and Google Gemini 3 Flash via `ProxyGatewayChatModel`, a LangChain `BaseChatModel` adapter that routes through a configurable proxy gateway. All three providers now support real SSE streaming, agent tool-calling, and normalized error diagnostics.
 
 ### Backend
 

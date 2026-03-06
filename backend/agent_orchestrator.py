@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import logging
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from .agent_graph import AgentState, build_agent_graph
+from .application.agent_session_builder import build_agent_initial_messages
 from .message_builder import history_as_messages
 from .model_registry import get_agent_config
 from .tools_registry import build_agent_tools
@@ -30,6 +29,7 @@ def run_agent(
     event_collector: list[dict] | None = None,
     event_emitter=None,
     emit_reasoning: bool = False,
+    cancel_token=None,
 ) -> None:
     """Run the LangGraph agent loop.
 
@@ -38,6 +38,8 @@ def run_agent(
     return value.
     """
     def _emit(event: dict):
+        if cancel_token is not None and cancel_token.cancelled:
+            return
         if isinstance(event_collector, list):
             event_collector.append(event)
         if callable(event_emitter):
@@ -66,23 +68,7 @@ def run_agent(
     from .agent_graph import _SYSTEM_PROMPT  # noqa: WPS436
 
     history_messages = history_as_messages(history)
-    history_systems = [
-        msg.content
-        for msg in history_messages
-        if isinstance(msg, SystemMessage) and isinstance(msg.content, str) and msg.content.strip()
-    ]
-    non_system_history = [
-        msg for msg in history_messages
-        if not isinstance(msg, SystemMessage)
-    ]
-
-    merged_system_prompt = _SYSTEM_PROMPT
-    if history_systems:
-        merged_system_prompt += "\n\n" + "\n\n".join(history_systems)
-
-    initial_messages = [SystemMessage(content=merged_system_prompt)]
-    initial_messages.extend(non_system_history)
-    initial_messages.append(HumanMessage(content=message))
+    initial_messages = build_agent_initial_messages(_SYSTEM_PROMPT, history_messages, message)
 
     initial_state: AgentState = {
         "messages": initial_messages,
@@ -94,4 +80,6 @@ def run_agent(
         "enable_reflection": agent_cfg.get("enable_reflection", False),
     }
 
+    if cancel_token is not None and cancel_token.cancelled:
+        return
     graph.invoke(initial_state)

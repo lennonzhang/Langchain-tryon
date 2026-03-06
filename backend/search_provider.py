@@ -29,18 +29,26 @@ class SearchProvider:
         self,
         search_fn: Callable[[str], tuple[str, list]],
         emit_fn: Callable[[dict], None],
+        cancel_token=None,
     ):
         self._search = search_fn
         self._emit = emit_fn
+        self._cancel_token = cancel_token
 
     def search_with_events(self, query: str) -> tuple[str, list]:
         """Run search and emit ``search_start`` / ``search_done`` | ``search_error``."""
+        if self._cancel_token and self._cancel_token.cancelled:
+            return "", []
         self._emit({"type": "search_start", "query": query})
         try:
             context, results = self._search(query)
+            if self._cancel_token and self._cancel_token.cancelled:
+                return "", []
             self._emit({"type": "search_done", "results": results})
             return context, results
         except Exception as exc:  # noqa: BLE001
             logger.warning("Search failed: %s", exc, exc_info=True)
+            if self._cancel_token and self._cancel_token.cancelled:
+                return "", []
             self._emit({"type": "search_error", "error": str(exc)})
             return "", []
