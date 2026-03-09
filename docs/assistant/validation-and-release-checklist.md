@@ -25,7 +25,7 @@ pnpm run build
 - Verify composer submit button switches to `Stop` only for the active running session; other sessions remain send-disabled.
 - Verify session delete action appears at card bottom-right on hover/focus for pointer-hover devices, and remains disabled for running sessions.
 - Verify sidebar remains fixed-responsive width on desktop/tablet and long session text does not resize sidebar width.
-- Verify mobile (`<=600px`) sessions drawer opens from chat header button and closes via backdrop/select/new-chat actions.
+- Verify mobile (`<=600px`) and narrow desktop layouts (`.app-shell < sessionSidebarWidth * 2.7`) use the sessions drawer from the chat header button and close via backdrop/select/new-chat actions.
 - Verify agent reasoning streams are paragraph-separated across steps (`agent_step_start`) and sticky in-chunk step text is split for readability.
 
 ## Contract Safety Checklist

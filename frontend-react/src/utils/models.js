@@ -6,6 +6,7 @@ export const FALLBACK_CAPABILITIES = {
   models: [
     { id: "moonshotai/kimi-k2.5", label: "Kimi K2.5", capabilities: { thinking: true, media: true, agent: false }, context_window: 131072 },
     { id: "qwen/qwen3.5-397b-a17b", label: "Qwen 3.5", capabilities: { thinking: true, media: false, agent: true }, context_window: 128000 },
+    { id: "qwen/qwen3.5-122b-a10b", label: "Qwen 3.5 122B", capabilities: { thinking: true, media: false, agent: true }, context_window: 262144 },
     { id: "z-ai/glm5", label: "GLM 5", capabilities: { thinking: true, media: false, agent: true }, context_window: 128000 },
   ],
 };

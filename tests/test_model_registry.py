@@ -49,6 +49,7 @@ class TestModelRegistry(unittest.TestCase):
         ids = get_ids()
         self.assertIn("moonshotai/kimi-k2.5", ids)
         self.assertIn("qwen/qwen3.5-397b-a17b", ids)
+        self.assertIn("qwen/qwen3.5-122b-a10b", ids)
         self.assertIn("z-ai/glm5", ids)
         self.assertIn("anthropic/claude-sonnet-4-6", ids)
         self.assertIn("openai/gpt-5.3-codex", ids)
@@ -87,6 +88,11 @@ class TestModelRegistry(unittest.TestCase):
         self.assertFalse(supports("qwen/qwen3.5-397b-a17b", "media"))
         self.assertTrue(supports("qwen/qwen3.5-397b-a17b", "agent"))
 
+    def test_qwen_122b_capabilities(self):
+        self.assertTrue(supports("qwen/qwen3.5-122b-a10b", "thinking"))
+        self.assertFalse(supports("qwen/qwen3.5-122b-a10b", "media"))
+        self.assertTrue(supports("qwen/qwen3.5-122b-a10b", "agent"))
+
     def test_glm5_capabilities(self):
         self.assertTrue(supports("z-ai/glm5", "thinking"))
         self.assertFalse(supports("z-ai/glm5", "media"))
@@ -110,6 +116,7 @@ class TestModelRegistry(unittest.TestCase):
     def test_known_context_windows(self):
         self.assertEqual(get_context_window("moonshotai/kimi-k2.5"), 131072)
         self.assertEqual(get_context_window("qwen/qwen3.5-397b-a17b"), 128000)
+        self.assertEqual(get_context_window("qwen/qwen3.5-122b-a10b"), 262144)
         self.assertEqual(get_context_window("z-ai/glm5"), 128000)
 
     def test_unknown_model_default_window(self):
@@ -126,6 +133,12 @@ class TestModelRegistry(unittest.TestCase):
 
     def test_qwen_params(self):
         p = get_params("qwen/qwen3.5-397b-a17b")
+        self.assertEqual(p["thinking_control"], "call_time")
+        self.assertEqual(p["thinking_kwarg_field"], "enable_thinking")
+        self.assertEqual(p["top_p"], 0.95)
+
+    def test_qwen_122b_params(self):
+        p = get_params("qwen/qwen3.5-122b-a10b")
         self.assertEqual(p["thinking_control"], "call_time")
         self.assertEqual(p["thinking_kwarg_field"], "enable_thinking")
         self.assertEqual(p["top_p"], 0.95)
@@ -210,7 +223,7 @@ class TestEnvDrivenModels(unittest.TestCase):
 
     def test_no_env_returns_full_registry(self):
         ids = get_ids()
-        self.assertEqual(len(ids), 6)
+        self.assertEqual(len(ids), 7)
         self.assertIn("openai/gpt-5.3-codex", ids)
 
     # ── filtering existing models ─────────────────────────────────
@@ -322,7 +335,7 @@ class TestEnvDrivenModels(unittest.TestCase):
         os.environ["ANTHROPIC_MODELS"] = ""
         _reset_active()
         # empty string means not set → full registry fallback
-        self.assertEqual(len(get_ids()), 6)
+        self.assertEqual(len(get_ids()), 7)
 
     def test_unknown_provider_model_skipped(self):
         # provider "anthropic" exists, but if we only set an unknown provider env

@@ -30,6 +30,27 @@ class TestModelProfileProviders(unittest.TestCase):
         self.assertEqual(kwargs["temperature"], 0.6)
         self.assertEqual(kwargs["top_p"], 0.95)
 
+    def test_build_chat_model_nvidia_qwen_122b(self):
+        fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
+        chat_cls = Mock()
+        fake_module.ChatNVIDIA = chat_cls
+        with (
+            patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}),
+            patch.dict(os.environ, {"NVIDIA_API_KEY": "nv-key"}, clear=False),
+        ):
+            build_chat_model(
+                api_key="fallback",
+                model="qwen/qwen3.5-122b-a10b",
+                thinking_mode=True,
+                provider="nvidia",
+            )
+
+        kwargs = chat_cls.call_args.kwargs
+        self.assertEqual(kwargs["api_key"], "nv-key")
+        self.assertEqual(kwargs["model"], "qwen/qwen3.5-122b-a10b")
+        self.assertEqual(kwargs["temperature"], 0.6)
+        self.assertEqual(kwargs["top_p"], 0.95)
+
     def test_build_chat_model_anthropic(self):
         with (
             patch.dict(

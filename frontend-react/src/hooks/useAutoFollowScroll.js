@@ -4,6 +4,7 @@ export function useAutoFollowScroll({ thresholdPx = 150, watchValue }) {
   const containerRef = useRef(null);
   const stickToBottomRef = useRef(true);
   const previousScrollHeightRef = useRef(0);
+  const rafRef = useRef(null);
 
   const getDistanceToBottom = useCallback((el) => {
     return el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -18,28 +19,39 @@ export function useAutoFollowScroll({ thresholdPx = 150, watchValue }) {
   }, [getDistanceToBottom, thresholdPx]);
 
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const distanceToBottom = getDistanceToBottom(el);
-    const previousScrollHeight = previousScrollHeightRef.current;
-    const previousDistanceToBottom =
-      previousScrollHeight > 0 ? previousScrollHeight - el.scrollTop - el.clientHeight : 0;
-
-    if (distanceToBottom <= thresholdPx || previousDistanceToBottom <= thresholdPx) {
-      stickToBottomRef.current = true;
+    // Cancel any pending frame and reschedule (batches rapid updates to one per frame)
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
     }
 
-    if (stickToBottomRef.current) {
-      requestAnimationFrame(() => {
-        const currentEl = containerRef.current;
-        if (!currentEl) return;
-        currentEl.scrollTop = currentEl.scrollHeight;
-      });
-    }
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const el = containerRef.current;
+      if (!el) return;
 
-    previousScrollHeightRef.current = el.scrollHeight;
+      const distanceToBottom = getDistanceToBottom(el);
+      const previousScrollHeight = previousScrollHeightRef.current;
+      const previousDistanceToBottom =
+        previousScrollHeight > 0 ? previousScrollHeight - el.scrollTop - el.clientHeight : 0;
+
+      if (distanceToBottom <= thresholdPx || previousDistanceToBottom <= thresholdPx) {
+        stickToBottomRef.current = true;
+      }
+
+      if (stickToBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+
+      previousScrollHeightRef.current = el.scrollHeight;
+    });
   }, [getDistanceToBottom, thresholdPx, watchValue]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
   return {
     containerRef,

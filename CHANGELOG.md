@@ -2,6 +2,63 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-09 (Responsive Session Drawer On Narrow Desktop)
+
+### Summary
+
+Extended the frontend session sidebar responsiveness so narrow desktop widths now collapse into the same overlay drawer pattern already used on mobile, without forcing the rest of the chat layout into mobile spacing.
+
+### Frontend
+
+- Updated the React app shell/session sidebar layout logic:
+  - measure `.app-shell` and rendered sidebar width with `ResizeObserver`
+  - switch to overlay mode when `.app-shell < sessionSidebarWidth * 2.7`
+  - keep the chat pane in desktop layout while only collapsing the session rail
+  - reuse the existing header-triggered drawer interactions for both true mobile and narrow desktop
+
+### Tests
+
+- Updated `frontend-react/src/__tests__/SessionSidebar.test.jsx`
+- Updated `frontend-react/src/__tests__/App.behavior.test.jsx`
+- added coverage for overlay auto-close behavior, backdrop gating, narrow-width activation, and widening back out of overlay mode
+
+### Docs
+
+- Updated `docs/assistant/architecture-rules.md`
+- Updated `docs/assistant/validation-and-release-checklist.md`
+- Updated `README.md`
+
+---
+
+## 2026-03-09 (Add NVIDIA Qwen 3.5 122B A10B Model)
+
+### Summary
+
+Added NVIDIA catalog support for `qwen/qwen3.5-122b-a10b`, including its reasoning/agent metadata and backend test coverage.
+
+### Backend
+
+- Updated `backend/domain/model_templates.py`:
+  - added `qwen/qwen3.5-122b-a10b`
+  - configured call-time thinking control via `chat_template_kwargs.enable_thinking`
+  - kept media input disabled so the model stays aligned with the current agent-first routing
+  - registered the same NVIDIA agent configuration used by the other agent-ready models
+
+### Tests
+
+- Updated `tests/test_model_registry.py`
+- Updated `tests/test_model_profile.py`
+- Updated `tests/test_nvidia_client.py`
+
+### Docs
+
+- Updated `README.md`
+- Updated `docs/assistant/model-and-provider-policy.md`
+- Updated `.env.example`
+- Documented that pinned `*_MODELS` env vars are allowlists and must include newly added models
+
+---
+
 ## 2026-03-09 (Session Delete Hover Reveal)
 
 ### Summary

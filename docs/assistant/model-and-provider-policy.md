@@ -14,6 +14,7 @@
 - NVIDIA:
   - `moonshotai/kimi-k2.5`
   - `qwen/qwen3.5-397b-a17b`
+  - `qwen/qwen3.5-122b-a10b`
   - `z-ai/glm5`
 - Anthropic:
   - `anthropic/claude-sonnet-4-6`
@@ -22,12 +23,19 @@
 - Google:
   - `google/gemini-3-pro-preview`
 
+## Env-Driven Visibility
+
+- The runtime catalog is filtered by `NVIDIA_MODELS`, `ANTHROPIC_MODELS`, `OPENAI_MODELS`, and `GOOGLE_MODELS` when any of those env vars are set.
+- These env vars are allowlists, not hints. A model present in `backend/domain/model_templates.py` will still be unavailable at runtime if it is missing from the corresponding `*_MODELS` list.
+- When adding a new model template, also update `.env`, `.env.example`, and deployment env config if the project is using pinned model lists.
+
 ## Default and Mode Policy
 
 - Default model: `openai/gpt-5.3-codex`
 - Auto `agent_mode` when omitted:
   - enabled: qwen, glm, claude, codex, gemini
   - disabled: kimi
+- Current media input support: `moonshotai/kimi-k2.5` only
 - If a model supports reasoning and `thinking_mode=true`, stream `reasoning` events.
 
 ## Routing Policy

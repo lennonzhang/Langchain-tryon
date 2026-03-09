@@ -31,13 +31,19 @@
   ],
   "functions": {
     "api/chat.py": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "excludeFiles": "{tests/**,docs/**,legacy/**,frontend-react/**,.claude/**,.cursor/**,.vscode/**,.github/**,tmp*/**,__pycache__/**,.pytest_cache/**,README.md,CHANGELOG.md,AGENTS.md,CLAUDE.md,api_examples.py,opencode.json}"
     },
     "api/chat/stream.py": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "excludeFiles": "{tests/**,docs/**,legacy/**,frontend-react/**,.claude/**,.cursor/**,.vscode/**,.github/**,tmp*/**,__pycache__/**,.pytest_cache/**,README.md,CHANGELOG.md,AGENTS.md,CLAUDE.md,api_examples.py,opencode.json}"
     },
     "api/chat/cancel.py": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "excludeFiles": "{tests/**,docs/**,legacy/**,frontend-react/**,.claude/**,.cursor/**,.vscode/**,.github/**,tmp*/**,__pycache__/**,.pytest_cache/**,README.md,CHANGELOG.md,AGENTS.md,CLAUDE.md,api_examples.py,opencode.json}"
+    },
+    "api/capabilities.py": {
+      "excludeFiles": "{tests/**,docs/**,legacy/**,frontend-react/**,.claude/**,.cursor/**,.vscode/**,.github/**,tmp*/**,__pycache__/**,.pytest_cache/**,README.md,CHANGELOG.md,AGENTS.md,CLAUDE.md,api_examples.py,opencode.json}"
     }
   }
 }

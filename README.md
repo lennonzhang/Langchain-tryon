@@ -41,6 +41,17 @@ GATEWAY_QUEUE_TIMEOUT_SECONDS=15
 MODEL_TIMEOUT_SECONDS=300
 ```
 
+Visible model lists (optional, but required if you pin `*_MODELS` in `.env`):
+
+```env
+NVIDIA_MODELS=moonshotai/kimi-k2.5,qwen/qwen3.5-397b-a17b,qwen/qwen3.5-122b-a10b,z-ai/glm5
+ANTHROPIC_MODELS=claude-sonnet-4-6
+OPENAI_MODELS=gpt-5.3-codex
+GOOGLE_MODELS=gemini-3-pro-preview
+```
+
+If any `*_MODELS` variable is set, the active catalog is filtered to that allowlist only. When adding a new model template, also add it to the matching env list in `.env` / deployment config if you use pinned model lists.
+
 Non-NVIDIA provider env (optional - for Anthropic, OpenAI, Google via proxy):
 
 ```env
@@ -93,7 +104,7 @@ Open `http://127.0.0.1:8000`.
 - Cancel path: `POST /api/chat/cancel`
 - Capabilities path: `GET /api/capabilities`
 - Models:
-  - NVIDIA: `moonshotai/kimi-k2.5`, `qwen/qwen3.5-397b-a17b`, `z-ai/glm5`
+  - NVIDIA: `moonshotai/kimi-k2.5`, `qwen/qwen3.5-397b-a17b`, `qwen/qwen3.5-122b-a10b`, `z-ai/glm5`
   - Anthropic: `anthropic/claude-sonnet-4-6` (via proxy)
   - OpenAI: `openai/gpt-5.3-codex` (default, via proxy)
   - Google: `google/gemini-3-pro-preview` (via proxy)
@@ -109,14 +120,14 @@ Open `http://127.0.0.1:8000`.
 - Search events and reasoning/token streams are shown in dedicated sections.
 - Agent reasoning is formatted into readable paragraphs using step-boundary and text heuristics during streaming.
 - Markdown code blocks provide copy actions and syntax highlighting (highlighting runs after stream completion).
-- `+ New Chat` enters a draft-only view (no immediate session creation).
+- `New chat` enters a draft-only view (no immediate session creation).
 - Switching from unsent draft to an existing session preserves draft text; first send from draft creates a real session and clears draft.
 - Composer send button switches to `Stop` while the active session is streaming; when another session is streaming, send remains disabled.
 - `Stop` first calls `POST /api/chat/cancel`, then aborts the local SSE request so backend cancellation can start immediately.
 - `context_usage` is emitted at start and refreshed with a terminal `phase=final` update before `done`.
 - Session sidebar keeps a stable responsive width on desktop/tablet and no longer resizes with long session content.
 - On pointer-hover devices, the session delete action appears on card hover/focus and remains disabled for running sessions.
-- On mobile (`<=600px`), sessions open as a left overlay drawer from the chat header `Sessions` button.
+- On mobile (`<=600px`) and on narrower desktop shells where the chat container is less than `2.7x` the rendered session-sidebar width, sessions open as a left overlay drawer from the chat header `Sessions` button.
 
 ## 5. Streaming Event Contract
 

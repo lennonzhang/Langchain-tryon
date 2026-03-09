@@ -22,16 +22,21 @@ describe("SessionList", () => {
   it("renders and allows select/delete", async () => {
     const onSelect = vi.fn();
     const onDelete = vi.fn();
+    const onCreateNew = vi.fn();
 
     render(
       <SessionList
         sessions={sessions}
         activeSessionId="s1"
         filter=""
+        onCreateNew={onCreateNew}
         onSelect={onSelect}
         onDelete={onDelete}
       />,
     );
+
+    await userEvent.click(screen.getByLabelText("New chat"));
+    expect(onCreateNew).toHaveBeenCalledTimes(1);
 
     expect(screen.getByText("First")).toBeInTheDocument();
     expect(screen.getByText("Second")).toBeInTheDocument();
@@ -49,6 +54,7 @@ describe("SessionList", () => {
         sessions={[]}
         activeSessionId={null}
         filter=""
+        onCreateNew={() => {}}
         onSelect={() => {}}
         onDelete={() => {}}
       />,
@@ -66,6 +72,7 @@ describe("SessionList", () => {
         activeSessionId="s1"
         runningSessionId="s2"
         filter=""
+        onCreateNew={() => {}}
         onSelect={() => {}}
         onDelete={onDelete}
       />,
@@ -90,6 +97,7 @@ describe("SessionList", () => {
         ]}
         activeSessionId="broken"
         filter=""
+        onCreateNew={() => {}}
         onSelect={() => {}}
         onDelete={() => {}}
       />,
@@ -114,16 +122,33 @@ describe("SessionList", () => {
         ]}
         activeSessionId="long"
         filter=""
+        onCreateNew={() => {}}
         onSelect={() => {}}
         onDelete={() => {}}
       />,
     );
 
-    const item = document.querySelector(".session-item");
+    const item = document.querySelector(".session-row:not(.session-row-entry) .session-item");
     const title = document.querySelector(".session-title");
     const preview = document.querySelector(".session-preview");
     expect(item?.querySelector(".session-item-top")).toBeTruthy();
     expect(title).toBeTruthy();
     expect(preview).toBeTruthy();
+  });
+
+  it("renders new chat entry before saved sessions", () => {
+    render(
+      <SessionList
+        sessions={sessions}
+        activeSessionId="s1"
+        filter=""
+        onCreateNew={() => {}}
+        onSelect={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+
+    const rows = screen.getByTestId("session-list").querySelectorAll(".session-row");
+    expect(rows[0]?.classList.contains("session-row-entry")).toBe(true);
   });
 });
