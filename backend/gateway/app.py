@@ -153,12 +153,11 @@ async def post_chat(request: Request):
         return _json_error(400, str(exc))
 
     try:
-        api_key = _require_api_key()
-    except RuntimeError as exc:
-        return _configuration_error(str(exc))
-
-    try:
         async with _ADMISSION_GATE.slot():
+            try:
+                api_key = _require_api_key()
+            except RuntimeError as exc:
+                return _configuration_error(str(exc))
             answer = await asyncio.to_thread(
                 chat_once,
                 api_key,
