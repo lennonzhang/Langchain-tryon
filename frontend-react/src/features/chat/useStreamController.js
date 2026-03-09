@@ -1,5 +1,5 @@
 import { useRef, useCallback } from "react";
-import { streamChat } from "../../shared/api/chatApiClient";
+import { cancelChat, streamChat } from "../../shared/api/chatApiClient";
 
 const MAX_RETRIES = 1;
 const RETRY_DELAY_MS = 2000;
@@ -29,12 +29,22 @@ function wait(ms, signal) {
 
 export function useStreamController() {
   const controllerRef = useRef(null);
+  const requestIdRef = useRef(null);
 
-  const abortStream = useCallback(() => {
+  const abortStream = useCallback(async () => {
+    const requestId = requestIdRef.current;
+    if (requestId) {
+      try {
+        await cancelChat(requestId);
+      } catch {
+        // Best effort: still abort the local transport below.
+      }
+    }
     if (controllerRef.current) {
       controllerRef.current.abort();
       controllerRef.current = null;
     }
+    requestIdRef.current = null;
   }, []);
 
   const startStream = useCallback(async ({ payload, onEvent, onDone, onTransportError, onAborted }) => {
@@ -45,6 +55,7 @@ export function useStreamController() {
 
     const controller = new AbortController();
     controllerRef.current = controller;
+    requestIdRef.current = payload?.request_id || null;
 
     let receivedToken = false;
     let attempt = 0;
@@ -82,6 +93,9 @@ export function useStreamController() {
     } finally {
       if (controllerRef.current === controller) {
         controllerRef.current = null;
+      }
+      if (requestIdRef.current === payload?.request_id) {
+        requestIdRef.current = null;
       }
     }
   }, []);

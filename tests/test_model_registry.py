@@ -1,6 +1,8 @@
+import os
 import unittest
 
 from backend.model_registry import (
+    _reset_active,
     capabilities_response,
     get_all,
     get_by_id,
@@ -14,9 +16,23 @@ from backend.model_registry import (
     supports,
 )
 
+_ENV_KEYS = ("NVIDIA_MODELS", "ANTHROPIC_MODELS", "OPENAI_MODELS", "GOOGLE_MODELS")
+
 
 class TestModelRegistry(unittest.TestCase):
-    """Unit tests for backend.model_registry."""
+    """Unit tests for backend.model_registry (full registry, no env override)."""
+
+    def setUp(self):
+        self._saved = {k: os.environ.pop(k, None) for k in _ENV_KEYS}
+        _reset_active()
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        _reset_active()
 
     # ── get_all / get_ids ────────────────────────────────────────
 
@@ -173,6 +189,152 @@ class TestModelRegistry(unittest.TestCase):
         default_id = resp["default"]
         ids = [m["id"] for m in resp["models"]]
         self.assertIn(default_id, ids)
+
+
+class TestEnvDrivenModels(unittest.TestCase):
+    """Tests for *_MODELS env-driven model list."""
+
+    def setUp(self):
+        self._saved = {k: os.environ.pop(k, None) for k in _ENV_KEYS}
+        _reset_active()
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        _reset_active()
+
+    # ── fallback when no env set ──────────────────────────────────
+
+    def test_no_env_returns_full_registry(self):
+        ids = get_ids()
+        self.assertEqual(len(ids), 6)
+        self.assertIn("openai/gpt-5.3-codex", ids)
+
+    # ── filtering existing models ─────────────────────────────────
+
+    def test_single_provider_filters_to_listed_models(self):
+        os.environ["ANTHROPIC_MODELS"] = "claude-sonnet-4-6"
+        _reset_active()
+        ids = get_ids()
+        self.assertEqual(ids, ("anthropic/claude-sonnet-4-6",))
+
+    def test_multiple_providers(self):
+        os.environ["ANTHROPIC_MODELS"] = "claude-sonnet-4-6"
+        os.environ["OPENAI_MODELS"] = "gpt-5.3-codex"
+        _reset_active()
+        ids = get_ids()
+        self.assertEqual(len(ids), 2)
+        self.assertIn("anthropic/claude-sonnet-4-6", ids)
+        self.assertIn("openai/gpt-5.3-codex", ids)
+
+    def test_nvidia_models_with_slash_in_name(self):
+        os.environ["NVIDIA_MODELS"] = "moonshotai/kimi-k2.5"
+        _reset_active()
+        ids = get_ids()
+        self.assertEqual(ids, ("moonshotai/kimi-k2.5",))
+
+    # ── dynamic model generation ──────────────────────────────────
+
+    def test_dynamic_model_inherits_template(self):
+        os.environ["ANTHROPIC_MODELS"] = "claude-opus-4-6-thinking"
+        _reset_active()
+        m = get_by_id("anthropic/claude-opus-4-6-thinking")
+        self.assertIsNotNone(m)
+        self.assertEqual(m["provider"], "anthropic")
+        self.assertEqual(m["upstream_model"], "claude-opus-4-6-thinking")
+        self.assertEqual(m["protocol"], "anthropic_messages")
+        self.assertIn("thinking", m["capabilities"])
+        self.assertIn("context_window", m)
+
+    def test_dynamic_model_label_is_upstream_name(self):
+        os.environ["ANTHROPIC_MODELS"] = "claude-sonnet-4-6-thinking"
+        _reset_active()
+        m = get_by_id("anthropic/claude-sonnet-4-6-thinking")
+        self.assertEqual(m["label"], "claude-sonnet-4-6-thinking")
+
+    def test_mix_existing_and_dynamic(self):
+        os.environ["ANTHROPIC_MODELS"] = "claude-sonnet-4-6,claude-opus-4-6-thinking"
+        _reset_active()
+        ids = get_ids()
+        self.assertEqual(len(ids), 2)
+        # existing keeps original label
+        existing = get_by_id("anthropic/claude-sonnet-4-6")
+        self.assertEqual(existing["label"], "Claude Sonnet 4.6")
+        # dynamic gets upstream name as label
+        dynamic = get_by_id("anthropic/claude-opus-4-6-thinking")
+        self.assertEqual(dynamic["label"], "claude-opus-4-6-thinking")
+
+    # ── default handling ──────────────────────────────────────────
+
+    def test_default_preserved_when_in_list(self):
+        os.environ["OPENAI_MODELS"] = "gpt-5.3-codex"
+        os.environ["ANTHROPIC_MODELS"] = "claude-sonnet-4-6"
+        _reset_active()
+        default = get_default()
+        self.assertEqual(default["id"], "openai/gpt-5.3-codex")
+
+    def test_default_falls_back_to_first_when_original_absent(self):
+        os.environ["ANTHROPIC_MODELS"] = "claude-sonnet-4-6"
+        _reset_active()
+        default = get_default()
+        self.assertEqual(default["id"], "anthropic/claude-sonnet-4-6")
+        self.assertTrue(default["default"])
+
+    def test_exactly_one_default(self):
+        os.environ["ANTHROPIC_MODELS"] = "claude-sonnet-4-6,claude-opus-4-6-thinking"
+        os.environ["OPENAI_MODELS"] = "gpt-5.3-codex"
+        _reset_active()
+        defaults = [m for m in get_all() if m["default"]]
+        self.assertEqual(len(defaults), 1)
+
+    # ── capabilities_response ─────────────────────────────────────
+
+    def test_capabilities_response_respects_env(self):
+        os.environ["ANTHROPIC_MODELS"] = "claude-sonnet-4-6,claude-opus-4-6-thinking"
+        _reset_active()
+        resp = capabilities_response()
+        ids = [m["id"] for m in resp["models"]]
+        self.assertEqual(len(ids), 2)
+        self.assertIn("anthropic/claude-opus-4-6-thinking", ids)
+        self.assertIn(resp["default"], ids)
+
+    def test_capabilities_dynamic_model_has_required_fields(self):
+        os.environ["ANTHROPIC_MODELS"] = "claude-opus-4-6-thinking"
+        _reset_active()
+        resp = capabilities_response()
+        m = resp["models"][0]
+        for field in ("id", "label", "capabilities", "context_window"):
+            self.assertIn(field, m)
+        for cap in ("thinking", "media", "agent"):
+            self.assertIn(cap, m["capabilities"])
+
+    # ── whitespace / edge cases ───────────────────────────────────
+
+    def test_whitespace_in_env_trimmed(self):
+        os.environ["ANTHROPIC_MODELS"] = " claude-sonnet-4-6 , claude-opus-4-6-thinking "
+        _reset_active()
+        self.assertEqual(len(get_ids()), 2)
+
+    def test_empty_env_value_ignored(self):
+        os.environ["ANTHROPIC_MODELS"] = ""
+        _reset_active()
+        # empty string means not set → full registry fallback
+        self.assertEqual(len(get_ids()), 6)
+
+    def test_unknown_provider_model_skipped(self):
+        # provider "anthropic" exists, but if we only set an unknown provider env
+        # there's no template, so it would be skipped. We test via NVIDIA with
+        # a non-existent upstream — it should still generate since nvidia template exists.
+        os.environ["NVIDIA_MODELS"] = "fake/nonexistent-model"
+        _reset_active()
+        ids = get_ids()
+        self.assertEqual(len(ids), 1)
+        m = get_by_id("nvidia/fake/nonexistent-model")
+        self.assertIsNotNone(m)
+        self.assertEqual(m["provider"], "nvidia")
 
 
 if __name__ == "__main__":

@@ -13,8 +13,19 @@
 ## Product Runtime Defaults
 
 - Primary chat path: `POST /api/chat/stream`
+- Cancel path: `POST /api/chat/cancel`
 - One-shot path: `POST /api/chat`
 - Capabilities path: `GET /api/capabilities`
+- Gateway concurrency env: `GATEWAY_MAX_CONCURRENCY`
+- Gateway queue env: `GATEWAY_MAX_QUEUE_SIZE`
+- Gateway queue timeout env: `GATEWAY_QUEUE_TIMEOUT_SECONDS`
+- Shared model timeout env: `MODEL_TIMEOUT_SECONDS`
+- Provider timeout envs: `<PROVIDER>_TIMEOUT_SECONDS`
+- Web loader per-page read timeout env: `WEB_LOADER_TIMEOUT_SECONDS` (default `10`)
+- Web loader connect timeout env: `WEB_LOADER_CONNECT_TIMEOUT` (default `5`)
+- Web search total budget env: `WEB_SEARCH_TOTAL_BUDGET_SECONDS` (default `15`)
+- Web loader max pages env: `WEB_LOADER_MAX_PAGES` (default `3`)
+- Web loader concurrency env: `WEB_LOADER_CONCURRENCY` (default `3`)
 - `thinking_mode` default: `true`
 - Auto `agent_mode` when omitted:
   - enabled: qwen, glm, claude, codex, gemini

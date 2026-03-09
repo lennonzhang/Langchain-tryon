@@ -8,10 +8,12 @@ import { MemorySessionRepository } from "../entities/session/memorySessionReposi
 
 const fetchCapabilities = vi.fn();
 const streamChat = vi.fn();
+const cancelChat = vi.fn();
 
 vi.mock("../shared/api/chatApiClient", () => ({
   fetchCapabilities: (...args) => fetchCapabilities(...args),
   streamChat: (...args) => streamChat(...args),
+  cancelChat: (...args) => cancelChat(...args),
 }));
 
 const CAPABILITIES_RESPONSE = {
@@ -55,11 +57,53 @@ function mockPendingAbortableStream({ emitDoneOnAbort = false } = {}) {
   };
 }
 
+function attachScrollMetrics(element, { scrollHeight = 0, clientHeight = 0, scrollTop = 0 } = {}) {
+  let currentScrollHeight = scrollHeight;
+  let currentClientHeight = clientHeight;
+  let currentScrollTop = scrollTop;
+
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    get: () => currentScrollHeight,
+    set: (value) => {
+      currentScrollHeight = value;
+    },
+  });
+
+  Object.defineProperty(element, "clientHeight", {
+    configurable: true,
+    get: () => currentClientHeight,
+    set: (value) => {
+      currentClientHeight = value;
+    },
+  });
+
+  Object.defineProperty(element, "scrollTop", {
+    configurable: true,
+    get: () => currentScrollTop,
+    set: (value) => {
+      currentScrollTop = value;
+    },
+  });
+
+  return {
+    setMetrics(next) {
+      if (typeof next.scrollHeight === "number") currentScrollHeight = next.scrollHeight;
+      if (typeof next.clientHeight === "number") currentClientHeight = next.clientHeight;
+      if (typeof next.scrollTop === "number") currentScrollTop = next.scrollTop;
+    },
+    readScrollTop() {
+      return currentScrollTop;
+    },
+  };
+}
+
 describe("App behavior (session v2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useChatUiStore.getState().reset();
     fetchCapabilities.mockResolvedValue(CAPABILITIES_RESPONSE);
+    cancelChat.mockResolvedValue({ cancelled: true });
     streamChat.mockImplementation(async (_payload, handlers) => {
       handlers.onEvent({ type: "token", content: "final answer" });
       handlers.onEvent({ type: "done" });
@@ -233,6 +277,63 @@ describe("App behavior (session v2)", () => {
     await screen.findByText("Ready");
   });
 
+  it("resumes auto-follow after the user scrolls back to the bottom", async () => {
+    const pending = mockPendingAbortableStream();
+    const originalRaf = global.requestAnimationFrame;
+    global.requestAnimationFrame = vi.fn((callback) => {
+      callback(0);
+      return 1;
+    });
+
+    try {
+      render(<App />);
+      const messageList = screen.getByTestId("messages-list");
+      const metrics = attachScrollMetrics(messageList, {
+        scrollHeight: 500,
+        clientHeight: 200,
+        scrollTop: 300,
+      });
+
+      await userEvent.type(await findComposerInput(), "scroll recovery");
+      fireEvent.submit(document.querySelector("form.composer"));
+
+      await waitFor(() => {
+        expect(pending.getHandlers()).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+      });
+      expect(metrics.readScrollTop()).toBe(500);
+
+      metrics.setMetrics({ scrollHeight: 650 });
+      await act(async () => {
+        pending.getHandlers().onEvent({ type: "token", content: "chunk one" });
+      });
+      expect(metrics.readScrollTop()).toBe(650);
+
+      metrics.setMetrics({ scrollTop: 100 });
+      fireEvent.scroll(messageList);
+
+      metrics.setMetrics({ scrollHeight: 780 });
+      await act(async () => {
+        pending.getHandlers().onEvent({ type: "token", content: "chunk two" });
+      });
+      expect(metrics.readScrollTop()).toBe(100);
+
+      metrics.setMetrics({ scrollTop: 580 });
+      fireEvent.scroll(messageList);
+
+      metrics.setMetrics({ scrollHeight: 900 });
+      await act(async () => {
+        pending.getHandlers().onEvent({ type: "token", content: "chunk three" });
+      });
+      expect(metrics.readScrollTop()).toBe(900);
+
+      await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+      await screen.findByText("Ready");
+    } finally {
+      global.requestAnimationFrame = originalRaf;
+    }
+  });
+
   it("splits reasoning into paragraphs across agent steps during streaming", async () => {
     const pending = mockPendingAbortableStream();
 
@@ -327,6 +428,27 @@ describe("App behavior (session v2)", () => {
 
     expect(await screen.findByText("final answer")).toBeInTheDocument();
     expect(streamChat).toHaveBeenCalledTimes(2);
+  });
+
+  it("stop calls cancel endpoint for the active request", async () => {
+    const pending = mockPendingAbortableStream();
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "cancel request check");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    await waitFor(() => {
+      expect(pending.getHandlers()).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => {
+      expect(cancelChat).toHaveBeenCalledTimes(1);
+    });
+    expect(cancelChat.mock.calls[0][0]).toEqual(expect.any(String));
+    expect(cancelChat.mock.calls[0][0].length).toBeGreaterThan(10);
   });
 
   it("stop without token stores canceled by user", async () => {

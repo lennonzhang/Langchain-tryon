@@ -8,6 +8,23 @@ export async function fetchCapabilities() {
   return resp.json();
 }
 
+export async function cancelChat(requestId) {
+  const resp = await fetch("/api/chat/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ request_id: requestId }),
+  });
+  if (!resp.ok) {
+    let detail = "Cancel failed";
+    try {
+      const body = await resp.json();
+      detail = body.error || detail;
+    } catch {}
+    throw new Error(detail);
+  }
+  return resp.json();
+}
+
 export async function streamChat(payload, handlers, { signal } = {}) {
   const resp = await fetch("/api/chat/stream", {
     method: "POST",

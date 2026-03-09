@@ -5,15 +5,24 @@
 
 ## Backend Rules
 
+- FastAPI is the backend gateway entrypoint.
 - Keep `backend/nvidia_client.py` as a facade, not a feature bucket.
-- Put detailed logic in extracted modules (full paths → [path index](./path-index.md#backend)):
+- Put detailed logic in extracted modules (full paths -> [path index](./path-index.md#backend)):
   - `model_profile`, `message_builder`, `agent_graph`, `agent_orchestrator`
-  - `event_mapper`, `search_provider`, `schemas`, `tools_registry`
-  - `proxy_chat_model`, `provider_router`, `provider_event_normalizer`
+- `event_mapper`, `search_provider`, `schemas`, `tools_registry`
+- `proxy_chat_model`, `provider_router`, `provider_event_normalizer`
+- `application/*`, `domain/*`, `infrastructure/*`, `gateway/*`
 - Non-NVIDIA provider logic belongs in `ProxyGatewayChatModel` path, not in `nvidia_client.py`.
 - All providers must implement real SSE streaming.
-- Use `SearchProvider` for both agent and non-agent search event emission.
+- Application-layer search orchestration belongs in `SearchService`; `SearchProvider` remains the shared event-emission adapter underneath.
+- Web page loading uses `httpx.AsyncClient` (async concurrent) + `trafilatura` (text extraction); `requests`+`bs4` is the fallback. Do not reintroduce `WebBaseLoader`.
 - Do not rename SSE events silently.
+- Gateway admission is centralized in `backend/gateway/admission.py`; do not re-implement queueing or throttling in facade code.
+- Static frontend serving must remain rooted under the frontend dist directory; preserve path traversal protection when changing gateway routes.
+- Request cancellation is registry-driven:
+  - frontend stop first hits `/api/chat/cancel`
+  - backend cancellation is best-effort but must stop local streaming immediately
+  - user stop terminates as `done(stop)`, not `error`
 
 ## Frontend Stream and Session Rules
 
@@ -45,7 +54,7 @@
 - Reasoning display formatting is frontend-only: prefer `agent_step_start` boundaries and text heuristics for readability, without changing SSE event contracts.
 - `context_usage` may be emitted multiple times; direct/agent flows emit a terminal `phase=final` usage event before `done(stop)`.
 
-> Component and hook paths → [path index: Frontend](./path-index.md#frontend).
+> Component and hook paths -> [path index: Frontend](./path-index.md#frontend).
 
 ## Change Hygiene
 

@@ -98,6 +98,12 @@ class TestModelProfileProviders(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "ANTHROPIC_API_KEY": "",
+                "ANTHROPIC_BASE_URL": "",
+                "OPENAI_API_KEY": "",
+                "OPENAI_BASE_URL": "",
+                "GOOGLE_API_KEY": "",
+                "GOOGLE_BASE_URL": "",
                 "CLAUDE_CLIENT_TOKEN_1": "claude-k",
                 "CLAUDE_API_URL": "https://claude2.sssaicode.com/api",
                 "CODEX_TOKEN_1": "codex-k",
@@ -132,6 +138,24 @@ class TestModelProfileProviders(unittest.TestCase):
         self.assertEqual(codex.base_url, "https://codex2.sssaicode.com/api/v1")
         self.assertEqual(gemini.api_key, "gemini-k")
         self.assertEqual(gemini.base_url, "https://gemini2.sssaicode.com/api/v1beta")
+
+    def test_provider_specific_timeout_applies_to_proxy_models(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "openai-key",
+                "OPENAI_TIMEOUT_SECONDS": "91",
+                "MODEL_TIMEOUT_SECONDS": "45",
+            },
+            clear=False,
+        ):
+            model = build_chat_model(
+                api_key="fallback",
+                model="openai/gpt-5.3-codex",
+                thinking_mode=True,
+                provider="openai",
+            )
+        self.assertEqual(model.timeout, 91.0)
 
 
 if __name__ == "__main__":

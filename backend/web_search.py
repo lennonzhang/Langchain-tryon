@@ -1,20 +1,28 @@
 """Web search via DuckDuckGo for context injection."""
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 import re
-import time
 import warnings
 
+import httpx
 import requests
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_WEB_LOADER_TIMEOUT_SECONDS = 2.0
-_DEFAULT_WEB_SEARCH_TOTAL_BUDGET_SECONDS = 4.0
+_DEFAULT_WEB_LOADER_TIMEOUT_SECONDS = 10.0
+_DEFAULT_WEB_SEARCH_TOTAL_BUDGET_SECONDS = 15.0
+_DEFAULT_WEB_LOADER_CONNECT_TIMEOUT = 5.0
 _DEFAULT_WEB_LOADER_MAX_PAGES = 3
 _DEFAULT_WEB_LOADER_CONCURRENCY = 3
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
 
 
 def _float_env(name: str, default: float, min_value: float) -> float:
@@ -57,19 +65,31 @@ def _extract_with_bs4(html: str, max_chars: int) -> str:
     return _normalize_text(text, max_chars=max_chars)
 
 
-def _fetch_with_requests(url: str, max_chars: int, timeout: float = 8.0) -> str:
-    headers = {"User-Agent": "langchain-tryon/1.0"}
+def _extract_text(html: str, max_chars: int) -> str:
+    """Extract main content from HTML, preferring trafilatura over bs4."""
+    try:
+        import trafilatura
+        text = trafilatura.extract(html)
+        if text:
+            return _normalize_text(text, max_chars=max_chars)
+    except Exception:  # noqa: BLE001
+        pass
+    return _extract_with_bs4(html, max_chars=max_chars)
+
+
+def _fetch_with_requests(url: str, max_chars: int, timeout: float = 10.0) -> str:
+    """Fallback loader using requests + trafilatura/bs4."""
+    headers = {"User-Agent": _BROWSER_UA}
     try:
         resp = requests.get(url, headers=headers, timeout=timeout)
         resp.raise_for_status()
-        return _extract_with_bs4(resp.text, max_chars=max_chars)
+        return _extract_text(resp.text, max_chars=max_chars)
     except requests.exceptions.SSLError:
-        # Some sites have broken cert chains / hostname mismatch.
         warnings.filterwarnings("ignore", message="Unverified HTTPS request")
         try:
             resp = requests.get(url, headers=headers, timeout=timeout, verify=False)
             resp.raise_for_status()
-            return _extract_with_bs4(resp.text, max_chars=max_chars)
+            return _extract_text(resp.text, max_chars=max_chars)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Requests fallback failed for %s: %s", url, exc)
             return ""
@@ -78,33 +98,123 @@ def _fetch_with_requests(url: str, max_chars: int, timeout: float = 8.0) -> str:
         return ""
 
 
-def load_webpage_content(url: str, max_chars: int = 1800, timeout_s: float = 8.0) -> str:
-    """Load and trim webpage text content using LangChain WebBaseLoader."""
-    try:
-        from langchain_community.document_loaders import WebBaseLoader
-    except ImportError:
-        logger.warning("langchain-community not installed; skip webpage loading.")
-        return ""
+# ---------------------------------------------------------------------------
+# Async page loading with httpx
+# ---------------------------------------------------------------------------
 
-    try:
+async def _fetch_page_async(
+    client: httpx.AsyncClient,
+    url: str,
+    max_chars: int,
+    sem: asyncio.Semaphore,
+) -> str:
+    """Fetch a single page using httpx, extract text with trafilatura/bs4."""
+    async with sem:
         try:
-            loader = WebBaseLoader(url, requests_kwargs={"timeout": timeout_s})
-        except TypeError:
-            loader = WebBaseLoader(web_paths=(url,), requests_kwargs={"timeout": timeout_s})
-        docs = loader.load()
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return _extract_text(resp.text, max_chars=max_chars)
+        except httpx.HTTPStatusError as exc:
+            logger.warning("HTTP %s for %s", exc.response.status_code, url)
+            return ""
+        except Exception as exc:  # noqa: BLE001
+            # Try with SSL verification disabled
+            try:
+                resp = await client.get(url, extensions={"verify": False})
+                resp.raise_for_status()
+                return _extract_text(resp.text, max_chars=max_chars)
+            except Exception as inner_exc:  # noqa: BLE001
+                logger.warning("httpx failed for %s: %s (ssl retry: %s)", url, exc, inner_exc)
+                return ""
+
+
+async def _load_pages_async(
+    urls: list[str],
+    read_timeout: float,
+    connect_timeout: float,
+    budget_s: float,
+    max_chars: int,
+    concurrency: int,
+) -> dict[str, str]:
+    """Concurrently load multiple pages with httpx async."""
+    sem = asyncio.Semaphore(concurrency)
+    timeout = httpx.Timeout(connect=connect_timeout, read=read_timeout, write=5.0, pool=5.0)
+    results: dict[str, str] = {}
+
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=True,
+        headers={"User-Agent": _BROWSER_UA},
+    ) as client:
+        tasks = {
+            url: asyncio.create_task(
+                asyncio.wait_for(
+                    _fetch_page_async(client, url, max_chars, sem),
+                    timeout=read_timeout,
+                )
+            )
+            for url in urls
+        }
+
+        done, pending = await asyncio.wait(
+            tasks.values(), timeout=budget_s
+        )
+
+        for task in pending:
+            task.cancel()
+
+        for url, task in tasks.items():
+            if task in done and not task.cancelled():
+                try:
+                    content = task.result()
+                    if content:
+                        results[url] = content
+                except Exception:  # noqa: BLE001
+                    pass
+
+    return results
+
+
+def _load_pages_sync(
+    urls: list[str],
+    read_timeout: float,
+    connect_timeout: float,
+    budget_s: float,
+    max_chars: int,
+    concurrency: int,
+) -> dict[str, str]:
+    """Synchronous wrapper around async page loader."""
+    coro = _load_pages_async(urls, read_timeout, connect_timeout, budget_s, max_chars, concurrency)
+    try:
+        asyncio.get_running_loop()
+        # Already in async context (e.g. FastAPI), run in a thread
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result(timeout=budget_s + 5)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
+# ---------------------------------------------------------------------------
+# Public API (signatures unchanged)
+# ---------------------------------------------------------------------------
+
+def load_webpage_content(url: str, max_chars: int = 1800, timeout_s: float = 10.0) -> str:
+    """Load and trim webpage text content. Drop-in replacement for the old WebBaseLoader path."""
+    try:
+        result = _load_pages_sync(
+            urls=[url],
+            read_timeout=timeout_s,
+            connect_timeout=_DEFAULT_WEB_LOADER_CONNECT_TIMEOUT,
+            budget_s=timeout_s + 2,
+            max_chars=max_chars,
+            concurrency=1,
+        )
+        content = result.get(url, "")
+        if content:
+            return content
     except Exception as exc:  # noqa: BLE001
-        logger.warning("WebBaseLoader failed for %s: %s", url, exc)
-        return _fetch_with_requests(url, max_chars=max_chars, timeout=timeout_s)
+        logger.warning("httpx loader failed for %s: %s", url, exc)
 
-    parts = []
-    for doc in docs or []:
-        page = getattr(doc, "page_content", "")
-        if isinstance(page, str) and page.strip():
-            parts.append(page)
-
-    merged = _normalize_text("\n".join(parts), max_chars=max_chars)
-    if merged:
-        return merged
     return _fetch_with_requests(url, max_chars=max_chars, timeout=timeout_s)
 
 
@@ -172,38 +282,26 @@ def web_search(
                     candidates.append((idx, url))
 
             if candidates:
-                workers = min(effective_concurrency, len(candidates))
-                executor = ThreadPoolExecutor(max_workers=workers)
-                started_at = time.monotonic()
-                future_to_index = {
-                    executor.submit(
-                        load_webpage_content,
-                        url,
-                        max_chars=1800,
-                        timeout_s=effective_timeout,
-                    ): idx
-                    for idx, url in candidates
-                }
-                try:
-                    for future in as_completed(future_to_index, timeout=effective_budget):
-                        idx = future_to_index[future]
-                        try:
-                            content = future.result()
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning("Parallel page loading failed: %s", exc)
-                            continue
-                        if content:
-                            results[idx]["content"] = content
-                except FuturesTimeoutError:
-                    elapsed = max(0.0, time.monotonic() - started_at)
-                    logger.info(
-                        "Web page loading budget exceeded for query '%s' (%.2fs/%.2fs).",
-                        query,
-                        elapsed,
-                        effective_budget,
-                    )
-                finally:
-                    executor.shutdown(wait=False, cancel_futures=True)
+                urls = [url for _, url in candidates]
+                idx_map = {url: idx for idx, url in candidates}
+
+                loaded = _load_pages_sync(
+                    urls=urls,
+                    read_timeout=effective_timeout,
+                    connect_timeout=_float_env(
+                        "WEB_LOADER_CONNECT_TIMEOUT",
+                        _DEFAULT_WEB_LOADER_CONNECT_TIMEOUT,
+                        0.1,
+                    ),
+                    budget_s=effective_budget,
+                    max_chars=1800,
+                    concurrency=effective_concurrency,
+                )
+
+                for url, content in loaded.items():
+                    idx = idx_map[url]
+                    results[idx]["content"] = content
+
         return results
     except Exception as exc:
         logger.error("DuckDuckGo search error: %s", exc)

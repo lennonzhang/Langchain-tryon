@@ -6,7 +6,7 @@ Quick operating notes for Claude Code in this repo.
 
 Full-stack LangChain chat app:
 
-- Backend: Python `http.server` style API + static serving
+- Backend: FastAPI gateway + SSE/cancel routes + static serving
 - Frontend: React + Vite output served from `frontend/dist`
 - Features: streaming SSE, web search, reasoning stream, optional multimodal input, tool-calling agent flow
 
@@ -36,8 +36,13 @@ pnpm test:e2e
   - check that `reasoning` is always present
 - Missing stream completion:
   - verify error invariant `error` then `done(error)`
+- Stop does not reduce backend work:
+  - verify frontend hits `POST /api/chat/cancel` before aborting local fetch
 - Cross-session stream bleed:
   - verify frontend isolation by `sessionId + requestId`
+- Web page loading timeout/failure:
+  - check `WEB_LOADER_TIMEOUT_SECONDS` (default `10`), `WEB_SEARCH_TOTAL_BUDGET_SECONDS` (default `15`)
+  - web loading uses httpx async + trafilatura; requests+bs4 is the fallback path
 
 ## Quick Navigation (Progressive Disclosure)
 
@@ -59,6 +64,7 @@ L3 deep index:
 
 - Default model: `openai/gpt-5.3-codex`
 - `thinking_mode` default: `true`
+- `request_id` max length: `256`
 - Auto `agent_mode` when omitted:
   - on: qwen, glm, claude, codex, gemini
   - off: kimi

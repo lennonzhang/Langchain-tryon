@@ -17,6 +17,10 @@
       "destination": "/api/chat/stream.py"
     },
     {
+      "source": "/api/chat/cancel",
+      "destination": "/api/chat/cancel.py"
+    },
+    {
       "source": "/assets/(.*)",
       "destination": "/frontend/dist/assets/$1"
     },
@@ -31,6 +35,9 @@
     },
     "api/chat/stream.py": {
       "maxDuration": 300
+    },
+    "api/chat/cancel.py": {
+      "maxDuration": 60
     }
   }
 }

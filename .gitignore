@@ -49,4 +49,5 @@ frontend-react/test-results/
 frontend-react/playwright-report/
 
 # Local agent/editor settings
-.claude/settings.local.json
+#.claude/settings.local.json
+.github/workflows/vercel-deploy.yml

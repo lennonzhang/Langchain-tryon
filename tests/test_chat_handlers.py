@@ -4,7 +4,7 @@ import unittest
 from urllib import error as urlerror
 from unittest.mock import patch
 
-from backend.chat_handlers import handle_chat_once, handle_chat_stream
+from backend.chat_handlers import handle_chat_cancel, handle_chat_once, handle_chat_stream
 from backend.http_utils import PayloadTooLargeError
 
 
@@ -35,6 +35,8 @@ class TestChatHandlers(unittest.TestCase):
             agent_mode=None,
             thinking_mode=True,
             images=[],
+            request_id=chat_once_mock.call_args.kwargs["request_id"],
+            debug_stream=False,
         )
         send_json_mock.assert_called_once_with(handler, 200, {"answer": "ok"})
 
@@ -67,6 +69,8 @@ class TestChatHandlers(unittest.TestCase):
             agent_mode=None,
             thinking_mode=True,
             images=[],
+            request_id=stream_chat_mock.call_args.kwargs["request_id"],
+            debug_stream=False,
         )
         self.assertEqual(send_sse_mock.call_count, 2)
 
@@ -100,6 +104,8 @@ class TestChatHandlers(unittest.TestCase):
             agent_mode=None,
             thinking_mode=False,
             images=["data:image/png;base64,abcd"],
+            request_id=stream_chat_mock.call_args.kwargs["request_id"],
+            debug_stream=False,
         )
 
     def test_handle_chat_once_passes_explicit_agent_mode_true(self):
@@ -340,6 +346,61 @@ class TestChatHandlers(unittest.TestCase):
             patch("backend.chat_handlers.send_json") as send_json_mock,
         ):
             handle_chat_stream(handler, "api-key")
+
+        send_json_mock.assert_called_once_with(handler, 413, {"error": "Payload too large"})
+
+    def test_handle_chat_cancel_requires_request_id(self):
+        handler = object()
+        with (
+            patch("backend.chat_handlers.read_json_body", return_value={}),
+            patch("backend.chat_handlers.send_json") as send_json_mock,
+        ):
+            handle_chat_cancel(handler)
+
+        send_json_mock.assert_called_once_with(handler, 400, {"error": "request_id is required"})
+
+    def test_handle_chat_cancel_returns_cancel_payload(self):
+        handler = object()
+        with (
+            patch("backend.chat_handlers.read_json_body", return_value={"request_id": "rid-1"}),
+            patch("backend.chat_handlers.cancel_chat", return_value={"cancelled": True}) as cancel_mock,
+            patch("backend.chat_handlers.send_json") as send_json_mock,
+        ):
+            handle_chat_cancel(handler)
+
+        cancel_mock.assert_called_once_with("rid-1")
+        send_json_mock.assert_called_once_with(handler, 200, {"cancelled": True})
+
+    def test_handle_chat_cancel_rejects_too_long_request_id(self):
+        handler = object()
+        with (
+            patch("backend.chat_handlers.read_json_body", return_value={"request_id": "r" * 257}),
+            patch("backend.chat_handlers.send_json") as send_json_mock,
+        ):
+            handle_chat_cancel(handler)
+
+        send_json_mock.assert_called_once()
+        args = send_json_mock.call_args[0]
+        self.assertEqual(args[1], 400)
+        self.assertIn("request_id: too long", args[2]["error"])
+
+    def test_handle_chat_cancel_invalid_json(self):
+        handler = object()
+        with (
+            patch("backend.chat_handlers.read_json_body", side_effect=ValueError("bad json")),
+            patch("backend.chat_handlers.send_json") as send_json_mock,
+        ):
+            handle_chat_cancel(handler)
+
+        send_json_mock.assert_called_once_with(handler, 400, {"error": "Invalid JSON body"})
+
+    def test_handle_chat_cancel_payload_too_large_returns_413(self):
+        handler = object()
+        with (
+            patch("backend.chat_handlers.read_json_body", side_effect=PayloadTooLargeError()),
+            patch("backend.chat_handlers.send_json") as send_json_mock,
+        ):
+            handle_chat_cancel(handler)
 
         send_json_mock.assert_called_once_with(handler, 413, {"error": "Payload too large"})
 

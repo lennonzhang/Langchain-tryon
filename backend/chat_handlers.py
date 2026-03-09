@@ -6,7 +6,7 @@ from urllib import error
 
 from .config import resolve_model
 from .http_utils import PayloadTooLargeError, init_sse, read_json_body, send_json, send_sse_event
-from .nvidia_client import chat_once, stream_chat
+from .nvidia_client import cancel_chat, chat_once, stream_chat
 from .provider_event_normalizer import normalize_upstream_error, normalized_error_detail
 from .schemas import ChatRequest, ValidationError
 
@@ -118,6 +118,8 @@ def handle_chat_once(handler, api_key: str, debug_stream: bool = False) -> None:
             agent_mode=req.agent_mode,
             thinking_mode=req.thinking_mode,
             images=req.images,
+            request_id=req.request_id,
+            debug_stream=debug_stream,
         )
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
@@ -252,6 +254,8 @@ def handle_chat_stream(handler, api_key: str, debug_stream: bool = False) -> Non
             agent_mode=req.agent_mode,
             thinking_mode=req.thinking_mode,
             images=req.images,
+            request_id=rid,
+            debug_stream=debug_stream,
         ):
             _debug_log_stream_event(debug_stream, rid, resolved_model, event)
             _emit(event)
@@ -282,3 +286,29 @@ def handle_chat_stream(handler, api_key: str, debug_stream: bool = False) -> Non
             raw_body=str(exc),
         )
         _emit_error_and_done(normalized_error_detail(info))
+
+
+def handle_chat_cancel(handler) -> None:
+    try:
+        data = read_json_body(handler)
+    except PayloadTooLargeError:
+        send_json(handler, 413, {"error": "Payload too large"})
+        return
+    except (ValueError, json.JSONDecodeError):
+        send_json(handler, 400, {"error": "Invalid JSON body"})
+        return
+
+    request_id = data.get("request_id")
+    if not isinstance(request_id, str) or not request_id.strip():
+        send_json(handler, 400, {"error": "request_id is required"})
+        return
+    request_id = request_id.strip()
+    if len(request_id) > ChatRequest._MAX_REQUEST_ID_CHARS:
+        send_json(
+            handler,
+            400,
+            {"error": f"request_id: too long (max {ChatRequest._MAX_REQUEST_ID_CHARS} chars)"},
+        )
+        return
+
+    send_json(handler, 200, cancel_chat(request_id))
