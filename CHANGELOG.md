@@ -2,6 +2,25 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-09 (Session Delete Hover Reveal)
+
+### Summary
+
+Adjusted the session delete affordance so it stays visually quieter in the sidebar: on pointer-hover devices the delete chip now appears only when a session card is hovered or keyboard-focused, while running sessions still keep deletion disabled.
+
+### Frontend
+
+- Updated `frontend-react/src/styles.css`:
+  - session delete control now hides by default on hover-capable devices
+  - reveals on `.session-row:hover` and `.session-row:focus-within` to preserve keyboard access
+  - touch devices keep the delete control visible so mobile deletion remains available
+
+### Docs
+
+- Updated `README.md` and `docs/assistant/validation-and-release-checklist.md` to reflect the new delete-button visibility behavior
+
+---
+
 ## 2026-03-06 (Web Loader: httpx async + trafilatura)
 
 ### Summary

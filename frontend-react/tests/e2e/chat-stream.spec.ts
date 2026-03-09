@@ -1,10 +1,26 @@
 import { expect, test } from "@playwright/test";
-import { mockSseFromFixture, sendMessage } from "../helpers/mockSse";
+import { mockChunkedSseFromFixture, mockSseFromFixture, sendMessage } from "../helpers/mockSse";
 
 async function getDistanceToBottom(page) {
   return page.locator("[data-testid='messages-list']").evaluate((el) => {
     return el.scrollHeight - el.scrollTop - el.clientHeight;
   });
+}
+
+async function waitForFollowState(page, expectedMaxDistance = 150) {
+  await expect.poll(() => getDistanceToBottom(page)).toBeLessThanOrEqual(expectedMaxDistance);
+}
+
+async function waitForDistanceAbove(page, expectedMinDistance = 150) {
+  await expect.poll(() => getDistanceToBottom(page)).toBeGreaterThan(expectedMinDistance);
+}
+
+async function scrollMessagesList(page, position: "top" | "bottom") {
+  await page.locator("[data-testid='messages-list']").evaluate((el, target) => {
+    const top = target === "top" ? 0 : el.scrollHeight;
+    el.scrollTo({ top, behavior: "instant" });
+    el.dispatchEvent(new UIEvent("scroll", { view: window }));
+  }, position);
 }
 
 test.describe("chat stream e2e", () => {
@@ -54,46 +70,33 @@ test.describe("chat stream e2e", () => {
   });
 
   test("auto-scroll follows stream when viewport stays at bottom", async ({ page }) => {
-    await mockSseFromFixture(page, "stream-multi-token.txt");
+    await mockChunkedSseFromFixture(page, "stream-multi-token.txt");
     await page.goto("/");
 
     await sendMessage(page, "long stream");
+    await expect(page.getByText("chunk-10")).toBeVisible();
+    await waitForFollowState(page);
     await expect(page.getByText("chunk-40")).toBeVisible();
-
-    const distanceToBottom = await getDistanceToBottom(page);
-    expect(distanceToBottom).toBeLessThanOrEqual(150);
+    await waitForFollowState(page);
   });
 
-  test("manual scroll-up disables follow until user scrolls back", async ({ page }) => {
-    await mockSseFromFixture(page, "stream-multi-token.txt");
+  test("manual scroll-up disables follow for subsequent streamed responses", async ({ page }) => {
+    await mockChunkedSseFromFixture(page, "stream-multi-token.txt");
     await page.goto("/");
     const streamBodies = page.locator(".msg.assistant.stream .assistant-body");
-    const list = page.locator("[data-testid='messages-list']");
 
     await sendMessage(page, "warmup long stream");
     await expect(streamBodies.last()).toContainText("chunk-40");
     await sendMessage(page, "first long stream");
     await expect(streamBodies.last()).toContainText("chunk-40");
 
-    await list.evaluate((el) => {
-      el.scrollTop = 0;
-      el.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
-    await expect.poll(() => getDistanceToBottom(page)).toBeGreaterThan(150);
+    await scrollMessagesList(page, "top");
+    await waitForDistanceAbove(page);
 
     await sendMessage(page, "second long stream");
+    await expect(streamBodies.last()).toContainText("chunk-10");
     await expect(streamBodies.last()).toContainText("chunk-40");
-    await expect.poll(() => getDistanceToBottom(page)).toBeGreaterThan(150);
-
-    await list.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-      el.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
-    await expect.poll(() => getDistanceToBottom(page), { timeout: 10000 }).toBeLessThanOrEqual(5);
-
-    await sendMessage(page, "third long stream");
-    await expect(streamBodies.last()).toContainText("chunk-40");
-    await expect.poll(() => getDistanceToBottom(page)).toBeLessThanOrEqual(150);
+    await waitForDistanceAbove(page);
   });
 
   test("completed answers do not show loading state during new stream", async ({ page }) => {

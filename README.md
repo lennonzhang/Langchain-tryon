@@ -115,6 +115,7 @@ Open `http://127.0.0.1:8000`.
 - `Stop` first calls `POST /api/chat/cancel`, then aborts the local SSE request so backend cancellation can start immediately.
 - `context_usage` is emitted at start and refreshed with a terminal `phase=final` update before `done`.
 - Session sidebar keeps a stable responsive width on desktop/tablet and no longer resizes with long session content.
+- On pointer-hover devices, the session delete action appears on card hover/focus and remains disabled for running sessions.
 - On mobile (`<=600px`), sessions open as a left overlay drawer from the chat header `Sessions` button.
 
 ## 5. Streaming Event Contract
