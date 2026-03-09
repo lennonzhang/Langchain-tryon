@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAttachments } from "./hooks/useAttachments";
+import { useAutoFollowScroll } from "./hooks/useAutoFollowScroll";
 import MessageList from "./components/MessageList";
 import Composer from "./components/Composer";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -21,9 +22,6 @@ function AppContent() {
 
   const { attachments, fileInputRef, handleFilesSelected, removeAttachment, clearAttachments } =
     useAttachments(supportsMedia);
-
-  const messagesRef = useRef(null);
-  const stickToBottomRef = useRef(true);
 
   const sessionListQuery = useSessionListQuery();
   const sessions = sessionListQuery.data || [];
@@ -84,12 +82,10 @@ function AppContent() {
     : [{ id: "connected", role: "assistant", content: CONNECTED_TEXT }];
   const isSessionDetailLoading = !isDraftSession && activeSessionQuery.isLoading;
 
-  const handleMessagesScroll = useCallback((event) => {
-    const el = event?.currentTarget || messagesRef.current;
-    if (!el) return;
-    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distanceToBottom <= autoScrollThresholdPx;
-  }, []);
+  const { containerRef: messagesRef, handleScroll: handleMessagesScroll } = useAutoFollowScroll({
+    thresholdPx: autoScrollThresholdPx,
+    watchValue: messages,
+  });
 
   const handleToggleSidebar = useCallback(() => toggleSidebar(), [toggleSidebar]);
   const handleOpenSidebar = useCallback(() => setSidebarOpen(true), [setSidebarOpen]);
@@ -104,15 +100,6 @@ function AppContent() {
       setActiveSessionId(null);
     }
   }, [deleteSessionMutation, setActiveSessionId]);
-
-  useEffect(() => {
-    const el = messagesRef.current;
-    if (!el) return;
-    if (!stickToBottomRef.current) return;
-    requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-  }, [messages]);
 
   return (
     <div className="app-shell">
