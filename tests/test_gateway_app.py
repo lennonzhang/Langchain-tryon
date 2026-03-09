@@ -157,6 +157,18 @@ class TestGatewayApp(unittest.TestCase):
         self.assertEqual(response.json()["error"], "Server misconfigured")
         self.assertIn("No API key found", response.json()["detail"])
 
+    def test_chat_route_runtime_error_still_maps_to_502(self):
+        payload = {"message": "hello", "request_id": "rid-runtime-error"}
+        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
+            gate.slot.return_value.__aenter__ = AsyncMock(return_value=None)
+            gate.slot.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch("backend.gateway.app.load_api_key", return_value="test-key"):
+                with patch("backend.gateway.app.chat_once", side_effect=RuntimeError("provider=openai | protocol=openai_responses | message=boom")):
+                    response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["error"], "Upstream request failed")
+        self.assertIn("provider=openai", response.json()["detail"])
+
     def test_chat_stream_missing_api_key_emits_error_and_done(self):
         payload = {"message": "hello", "request_id": "rid-stream-missing-key"}
         with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:

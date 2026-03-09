@@ -154,6 +154,10 @@ async def post_chat(request: Request):
 
     try:
         api_key = _require_api_key()
+    except RuntimeError as exc:
+        return _configuration_error(str(exc))
+
+    try:
         async with _ADMISSION_GATE.slot():
             answer = await asyncio.to_thread(
                 chat_once,
@@ -170,8 +174,6 @@ async def post_chat(request: Request):
             )
     except (QueueFullError, QueueTimeoutError) as exc:
         return JSONResponse(status_code=503, content={"error": str(exc)})
-    except RuntimeError as exc:
-        return _configuration_error(str(exc))
     except TimeoutError as exc:
         return JSONResponse(status_code=504, content={"error": "Upstream request timeout", "detail": str(exc)[:500]})
     except Exception as exc:  # noqa: BLE001
