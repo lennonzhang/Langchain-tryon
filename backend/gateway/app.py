@@ -18,7 +18,6 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 
 app = FastAPI()
-_API_KEY = load_api_key(BASE_DIR)
 _ADMISSION_GATE = AdmissionGate.from_env()
 app.state.debug_stream = False
 _MAX_JSON_BODY = 10 * 1024 * 1024
@@ -71,6 +70,10 @@ def _json_error(status: int, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": message})
 
 
+def _configuration_error(message: str) -> JSONResponse:
+    return JSONResponse(status_code=500, content={"error": "Server misconfigured", "detail": message[:500]})
+
+
 def _enrich_event(payload: dict, request_id: str | None = None) -> str:
     enriched = {**payload, "v": 1}
     if request_id:
@@ -115,6 +118,10 @@ def _stream_error_response(message: str, request_id: str | None) -> StreamingRes
     )
 
 
+def _require_api_key() -> str:
+    return load_api_key(BASE_DIR)
+
+
 def _safe_frontend_target(rel_path: str) -> tuple[Path | None, int | None]:
     frontend_root = FRONTEND_DIST_DIR.resolve()
     if rel_path in {"", "/"}:
@@ -146,10 +153,11 @@ async def post_chat(request: Request):
         return _json_error(400, str(exc))
 
     try:
+        api_key = _require_api_key()
         async with _ADMISSION_GATE.slot():
             answer = await asyncio.to_thread(
                 chat_once,
-                _API_KEY,
+                api_key,
                 req.message,
                 req.history,
                 req.model,
@@ -162,6 +170,8 @@ async def post_chat(request: Request):
             )
     except (QueueFullError, QueueTimeoutError) as exc:
         return JSONResponse(status_code=503, content={"error": str(exc)})
+    except RuntimeError as exc:
+        return _configuration_error(str(exc))
     except TimeoutError as exc:
         return JSONResponse(status_code=504, content={"error": "Upstream request timeout", "detail": str(exc)[:500]})
     except Exception as exc:  # noqa: BLE001
@@ -189,9 +199,15 @@ async def post_chat_stream(request: Request):
     except QueueTimeoutError as exc:
         return _stream_error_response(str(exc), req.request_id)
 
+    try:
+        api_key = _require_api_key()
+    except RuntimeError as exc:
+        await _ADMISSION_GATE.release()
+        return _stream_error_response(f"Server misconfigured: {str(exc)[:500]}", req.request_id)
+
     def build_stream():
         return stream_chat(
-            _API_KEY,
+            api_key,
             req.message,
             req.history,
             req.model,
