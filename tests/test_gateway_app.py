@@ -128,11 +128,13 @@ class TestGatewayApp(unittest.TestCase):
         with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
             gate.slot.return_value.__aenter__ = AsyncMock(return_value=None)
             gate.slot.return_value.__aexit__ = AsyncMock(return_value=False)
-            with patch("backend.gateway.app.chat_once", return_value="ok") as chat_once_mock:
-                response = self.client.post("/api/chat", json=payload)
+            with patch("backend.gateway.app.load_api_key", return_value="test-key"):
+                with patch("backend.gateway.app.chat_once", return_value="ok") as chat_once_mock:
+                    response = self.client.post("/api/chat", json=payload)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"answer": "ok"})
         self.assertTrue(chat_once_mock.call_args.kwargs["debug_stream"])
+        self.assertEqual(chat_once_mock.call_args.args[0], "test-key")
 
     def test_chat_stream_forwards_debug_stream_flag(self):
         payload = {"message": "hello", "request_id": "rid-stream-debug"}
@@ -140,10 +142,47 @@ class TestGatewayApp(unittest.TestCase):
         with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
             gate.acquire = AsyncMock(return_value=None)
             gate.release = AsyncMock(return_value=None)
-            with patch("backend.gateway.app.stream_chat", return_value=iter([{"type": "done", "finish_reason": "stop"}])) as stream_chat_mock:
-                response = self.client.post("/api/chat/stream", json=payload)
+            with patch("backend.gateway.app.load_api_key", return_value="test-key"):
+                with patch("backend.gateway.app.stream_chat", return_value=iter([{"type": "done", "finish_reason": "stop"}])) as stream_chat_mock:
+                    response = self.client.post("/api/chat/stream", json=payload)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(stream_chat_mock.call_args.kwargs["debug_stream"])
+        self.assertEqual(stream_chat_mock.call_args.args[0], "test-key")
+
+    def test_chat_route_returns_500_when_api_key_missing(self):
+        payload = {"message": "hello", "request_id": "rid-missing-key"}
+        with patch("backend.gateway.app.load_api_key", side_effect=RuntimeError("No API key found. Set NVIDIA_API_KEY in system env or .env.")):
+            response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["error"], "Server misconfigured")
+        self.assertIn("No API key found", response.json()["detail"])
+
+    def test_chat_route_runtime_error_still_maps_to_502(self):
+        payload = {"message": "hello", "request_id": "rid-runtime-error"}
+        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
+            gate.slot.return_value.__aenter__ = AsyncMock(return_value=None)
+            gate.slot.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch("backend.gateway.app.load_api_key", return_value="test-key"):
+                with patch("backend.gateway.app.chat_once", side_effect=RuntimeError("provider=openai | protocol=openai_responses | message=boom")):
+                    response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["error"], "Upstream request failed")
+        self.assertIn("provider=openai", response.json()["detail"])
+
+    def test_chat_stream_missing_api_key_emits_error_and_done(self):
+        payload = {"message": "hello", "request_id": "rid-stream-missing-key"}
+        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
+            gate.acquire = AsyncMock(return_value=None)
+            gate.release = AsyncMock(return_value=None)
+            with patch("backend.gateway.app.load_api_key", side_effect=RuntimeError("No API key found. Set NVIDIA_API_KEY in system env or .env.")):
+                response = self.client.post("/api/chat/stream", json=payload)
+        self.assertEqual(response.status_code, 200)
+        body = response.text
+        self.assertIn('"type": "error"', body)
+        self.assertIn('"error": "Server misconfigured: No API key found.', body)
+        self.assertIn('"type": "done"', body)
+        self.assertIn('"finish_reason": "error"', body)
+        self.assertIn('"request_id": "rid-stream-missing-key"', body)
 
     def test_frontend_route_blocks_path_traversal(self):
         with patch.object(gateway_app_module, "FRONTEND_DIST_DIR", Path.cwd()):
