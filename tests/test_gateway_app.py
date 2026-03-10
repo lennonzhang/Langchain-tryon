@@ -16,6 +16,9 @@ class TestGatewayApp(unittest.TestCase):
         app.state.debug_stream = False
         app.state.shutdown_requested = False
         self._too_long_request_id = "r" * 257
+        self._api_key_patcher = patch.object(gateway_app_module, "_API_KEY", "test-api-key")
+        self._api_key_patcher.start()
+        self.addCleanup(self._api_key_patcher.stop)
 
     def test_capabilities_route(self):
         response = self.client.get("/api/capabilities")
