@@ -11,10 +11,11 @@ Extended the frontend session sidebar responsiveness so narrow desktop widths no
 ### Frontend
 
 - Updated the React app shell/session sidebar layout logic:
-  - measure `.app-shell` and rendered sidebar width with `ResizeObserver`
-  - switch to overlay mode when `.app-shell < sessionSidebarWidth * 2.7`
+  - measure shell width and rendered sidebar width with `ResizeObserver`
+  - switch to overlay mode when `appShellWidth <= sessionSidebarWidth * 2.7`
   - keep the chat pane in desktop layout while only collapsing the session rail
   - reuse the existing header-triggered drawer interactions for both true mobile and narrow desktop
+  - reduce the chat card outer radius while narrow-desktop overlay mode is active so the panel matches the tighter layout before full mobile styles take over
 
 ### Tests
 

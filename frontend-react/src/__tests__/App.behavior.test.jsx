@@ -285,6 +285,38 @@ describe("App behavior (session v2)", () => {
     await waitFor(() => expect(sidebar).not.toHaveClass("is-open"));
   });
 
+  it("keeps overlay mode stable across repeated resize notifications at the same narrow width", async () => {
+    render(<App />);
+
+    const appShell = document.querySelector(".app-shell");
+    const sidebar = document.getElementById("session-sidebar");
+    setElementWidth(appShell, 840);
+    setElementWidth(sidebar, 320);
+
+    act(() => {
+      resizeObserverEnv.trigger([appShell, sidebar]);
+      resizeObserverEnv.trigger([appShell, sidebar]);
+      resizeObserverEnv.trigger([appShell, sidebar]);
+    });
+
+    await waitFor(() => expect(appShell).toHaveClass("is-session-overlay"));
+  });
+
+  it("enters overlay mode at the exact width threshold", async () => {
+    render(<App />);
+
+    const appShell = document.querySelector(".app-shell");
+    const sidebar = document.getElementById("session-sidebar");
+    setElementWidth(appShell, 864);
+    setElementWidth(sidebar, 320);
+
+    act(() => {
+      resizeObserverEnv.trigger([appShell, sidebar]);
+    });
+
+    await waitFor(() => expect(appShell).toHaveClass("is-session-overlay"));
+  });
+
   it("uses the same overlay sidebar mode on true mobile viewports", async () => {
     mediaQueryEnv.setMatches(true);
     render(<App />);

@@ -127,7 +127,8 @@ Open `http://127.0.0.1:8000`.
 - `context_usage` is emitted at start and refreshed with a terminal `phase=final` update before `done`.
 - Session sidebar keeps a stable responsive width on desktop/tablet and no longer resizes with long session content.
 - On pointer-hover devices, the session delete action appears on card hover/focus and remains disabled for running sessions.
-- On mobile (`<=600px`) and on narrower desktop shells where the chat container is less than `2.7x` the rendered session-sidebar width, sessions open as a left overlay drawer from the chat header `Sessions` button.
+- On mobile (`<=600px`) and on narrower desktop layouts where the whole panel width is less than or equal to `2.7x` the rendered session-sidebar width, sessions open as a left overlay drawer from the chat header `Sessions` button.
+- When that narrow desktop overlay mode is active above the mobile breakpoint, the chat card keeps desktop spacing but uses a reduced outer corner radius so the panel does not look oversized.
 
 ## 5. Streaming Event Contract
 

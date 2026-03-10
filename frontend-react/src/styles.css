@@ -1614,6 +1614,10 @@ input:disabled {
   grid-template-columns: 1fr;
 }
 
+.app-shell.is-session-overlay .chat {
+  border-radius: clamp(var(--radius-md), 2vw, var(--radius-lg));
+}
+
 .app-shell.is-session-overlay .header-sessions-btn {
   display: inline-flex;
 }

@@ -40,7 +40,7 @@ export function useResponsiveSessionSidebar() {
       return;
     }
 
-    setIsSessionOverlay(appShellWidth < sidebarWidth * SESSION_OVERLAY_RATIO);
+    setIsSessionOverlay(appShellWidth <= sidebarWidth * SESSION_OVERLAY_RATIO);
   }, []);
 
   useLayoutEffect(() => {
