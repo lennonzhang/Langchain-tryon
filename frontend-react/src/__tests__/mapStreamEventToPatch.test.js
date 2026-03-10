@@ -11,6 +11,8 @@ function baseMessage() {
     reasoning: "",
     reasoningStepCursor: 0,
     reasoningNeedsStepBreak: false,
+    finishReason: null,
+    clarification: null,
     answer: "Thinking...",
   };
 }
@@ -173,6 +175,43 @@ describe("mapStreamEventToPatch", () => {
     msg = mapStreamEventToPatch(msg, { type: "done", finish_reason: "error" });
     expect(msg.status).toBe("failed");
     expect(msg.answer).toBe("Error: boom");
+  });
+
+  it("stores clarification metadata for user input requests", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, {
+      type: "user_input_required",
+      question: "Which environment should I use?",
+      options: [
+        { id: "staging", label: "staging", description: "Safer rollout" },
+        { id: "prod", label: "production" },
+      ],
+      allow_free_text: false,
+    });
+
+    expect(msg.answer).toBe("Which environment should I use?");
+    expect(msg.clarification).toEqual({
+      question: "Which environment should I use?",
+      options: [
+        { id: "staging", label: "staging", description: "Safer rollout" },
+        { id: "prod", label: "production", description: "" },
+      ],
+      allowFreeText: false,
+      answered: false,
+    });
+  });
+
+  it("done event preserves question text in answer when clarification exists", () => {
+    let msg = baseMessage();
+    msg = mapStreamEventToPatch(msg, {
+      type: "user_input_required",
+      question: "Which env?",
+      options: [],
+    });
+    expect(msg.answer).toBe("Which env?");
+    msg = mapStreamEventToPatch(msg, { type: "done", finish_reason: "user_input_required" });
+    expect(msg.answer).toBe("Which env?");
+    expect(msg.status).toBe("done");
   });
 });
 

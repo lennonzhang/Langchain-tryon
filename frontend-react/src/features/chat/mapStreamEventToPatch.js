@@ -185,6 +185,30 @@ export function mapStreamEventToPatch(message, event) {
     };
   }
 
+  if (event.type === "user_input_required") {
+    const question = String(event.question || "").trim() || "Please provide the missing information.";
+    const rawOptions = Array.isArray(event.options) ? event.options : [];
+    const options = rawOptions
+      .filter((option) => option && typeof option === "object" && String(option.label || "").trim())
+      .slice(0, 3)
+      .map((option, index) => ({
+        id: String(option.id || `option-${index + 1}`),
+        label: String(option.label || "").trim(),
+        description: String(option.description || "").trim(),
+      }));
+
+    return {
+      ...message,
+      clarification: {
+        question,
+        options,
+        allowFreeText: event.allow_free_text !== false,
+        answered: false,
+      },
+      answer: question,
+    };
+  }
+
   if (event.type === "error") {
     return {
       ...message,
@@ -198,6 +222,7 @@ export function mapStreamEventToPatch(message, event) {
       return {
         ...message,
         status: "failed",
+        finishReason: event.finish_reason || message.finishReason || "error",
       };
     }
 
@@ -206,6 +231,7 @@ export function mapStreamEventToPatch(message, event) {
     return {
       ...message,
       status: "done",
+      finishReason: event.finish_reason || message.finishReason || null,
       answer: normalizedAnswer,
     };
   }

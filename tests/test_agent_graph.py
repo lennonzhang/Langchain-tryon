@@ -71,6 +71,8 @@ def _initial_state(**overrides) -> AgentState:
         "step_end_emitted": False,
         "enable_planning": False,
         "enable_reflection": False,
+        "pending_user_input": None,
+        "interrupted_for_user_input": False,
     }
     defaults.update(overrides)
     return defaults
@@ -211,6 +213,55 @@ class TestAgentGraphWithToolCalls(unittest.TestCase):
         self.assertIn("You have reached the maximum number of steps.", forced_messages[0].content)
         trailing_system = any(isinstance(msg, SystemMessage) for msg in forced_messages[1:])
         self.assertFalse(trailing_system)
+
+    def test_request_user_input_interrupts_agent(self):
+        events = []
+
+        tool_call_msg = _make_ai_msg(
+            "",
+            tool_calls=[
+                _make_tool_call(
+                    "request_user_input",
+                    {
+                        "question": "Which deployment target should I use?",
+                        "options": [
+                            {"label": "staging", "description": "Validate before release"},
+                            {"label": "production"},
+                        ],
+                    },
+                )
+            ],
+        )
+        llm = FakeLLM(responses=[tool_call_msg])
+
+        fake_tool = MagicMock()
+        fake_tool.name = "request_user_input"
+
+        graph = build_agent_graph(
+            client=llm,
+            model="openai/gpt-5.3-codex",
+            tools=[fake_tool],
+            thinking_mode=True,
+            emit_reasoning=False,
+            event_emitter=events.append,
+        )
+
+        result = graph.invoke(_initial_state())
+
+        types = [e["type"] for e in events]
+        self.assertIn("user_input_required", types)
+        self.assertNotIn("tool_result", types)
+        self.assertNotIn("token", types)
+        self.assertEqual(types.count("agent_step_start"), types.count("agent_step_end"))
+        interrupt_evt = next(e for e in events if e["type"] == "user_input_required")
+        self.assertEqual(interrupt_evt["question"], "Which deployment target should I use?")
+        self.assertEqual(interrupt_evt["options"][0]["label"], "staging")
+
+        # ToolMessage must be appended so the tool_call has a matching result.
+        from langchain_core.messages import ToolMessage
+        tool_msgs = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+        self.assertTrue(len(tool_msgs) >= 1, "Expected at least one ToolMessage for request_user_input")
+        self.assertEqual(tool_msgs[-1].content, "User input requested.")
 
 
 class TestAgentGraphReasoning(unittest.TestCase):

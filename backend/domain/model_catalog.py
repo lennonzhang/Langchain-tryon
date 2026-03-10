@@ -14,7 +14,7 @@ _PROVIDER_ENV_KEYS = {
 
 _DEFAULT_AGENT_CONFIG: dict = {
     "max_steps": 6,
-    "tools": ["web_search", "read_url"],
+    "tools": ["web_search", "read_url", "request_user_input"],
     "enable_planning": False,
     "enable_reflection": False,
 }

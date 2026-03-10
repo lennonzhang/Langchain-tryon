@@ -413,6 +413,51 @@ describe("App behavior (session v2)", () => {
     expect(await screen.findByText("Error: boom")).toBeInTheDocument();
   });
 
+  it("shows clarification card and option click continues as a normal next turn", async () => {
+    streamChat
+      .mockImplementationOnce(async (_payload, handlers) => {
+        handlers.onEvent({
+          type: "user_input_required",
+          question: "Which environment should I use?",
+          options: [
+            { id: "staging", label: "staging", description: "Validate first" },
+            { id: "prod", label: "production" },
+          ],
+          allow_free_text: true,
+        });
+        handlers.onEvent({ type: "done", finish_reason: "user_input_required" });
+        handlers.onDone?.({ type: "done", finish_reason: "user_input_required" });
+      })
+      .mockImplementationOnce(async (_payload, handlers) => {
+        handlers.onEvent({ type: "token", content: "continued answer" });
+        handlers.onEvent({ type: "done", finish_reason: "stop" });
+        handlers.onDone?.({ type: "done", finish_reason: "stop" });
+      });
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "help me deploy");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    expect(await screen.findByText("Need Your Input")).toBeInTheDocument();
+    const messageList = screen.getByTestId("messages-list");
+    expect(within(messageList).getByText("Which environment should I use?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /staging/i })).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+    // Answer section should be hidden when clarification is active
+    expect(screen.queryByText("Answer")).not.toBeInTheDocument();
+    // Sidebar preview should also show the question text
+    expect(within(screen.getByRole("complementary")).getByText(/Which environment/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /staging/i }));
+
+    expect(await within(messageList).findByText("continued answer")).toBeInTheDocument();
+    expect(streamChat).toHaveBeenCalledTimes(2);
+    expect(streamChat.mock.calls[1][0].message).toBe("staging");
+    expect(streamChat.mock.calls[1][0].history.some((item) => item.content.includes("Which environment should I use?"))).toBe(true);
+    // Old clarification card should now show answered state
+    expect(screen.getByText("Answered")).toBeInTheDocument();
+  });
+
   it("shows typing only for current streaming message after a previous failed message", async () => {
     streamChat
       .mockImplementationOnce(async (_payload, handlers) => {

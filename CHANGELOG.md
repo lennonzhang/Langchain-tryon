@@ -2,6 +2,75 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-10 (Agent Clarification Interrupts - Phase A, UI polish)
+
+### UI Polish & Bug Fixes (post-review)
+
+- **Backend**: `execute_tools_node` now appends a `ToolMessage` for the `request_user_input` tool call, ensuring conversation history integrity for Phase B resumption
+- **Backend**: Question text capped at 500 chars with word-boundary truncation; option truncation now logs a warning
+- **Frontend**: Clarification card redesigned with violet (`--accent`) theme, callout-style left border, and question-mark icon
+- **Frontend**: Added inline free-text input inside the clarification card when `allowFreeText` is true
+- **Frontend**: Clarification cards now transition to "Answered" state (dimmed, non-interactive) when the user submits their response
+- **Frontend**: Answer section hidden when a clarification card is active (no more duplicate question text)
+- **Frontend**: `canSubmitClarification` now scoped to the active session instead of blocking across all sessions
+- **Frontend**: Added responsive stacking for option buttons on mobile, keyboard focus-visible ring, and ARIA attributes
+
+## 2026-03-10 (Agent Clarification Interrupts - Phase A, initial)
+
+### Summary
+
+Implemented Codex-style clarification interrupts for agent-capable models. The agent can now ask the user a structured follow-up question through `request_user_input`, the backend emits `user_input_required`, and the frontend unlocks the session so the next reply continues as a normal follow-up turn.
+
+### Backend
+
+- Updated `backend/tools_registry.py`:
+  - added the `request_user_input` tool with structured schema and argument normalization
+- Updated `backend/domain/model_templates.py` and `backend/domain/model_catalog.py`:
+  - enabled `request_user_input` for agent-capable model configs
+- Updated `backend/agent_graph.py`:
+  - intercept `request_user_input` before normal tool execution
+  - emit `user_input_required`
+  - terminate the current agent run without `tool_result` or final answer streaming
+- Updated `backend/event_mapper.py`:
+  - emit `done(user_input_required)` and skip terminal final-usage emission on clarification interrupts
+- Updated `backend/application/chat_use_cases.py`:
+  - one-shot agent requests now return the clarification question text when interrupted
+- Updated `backend/chat_handlers.py`:
+  - added stream debug logging for `user_input_required`
+
+### Frontend
+
+- Updated the SSE pipeline so terminal `done` payloads propagate through:
+  - `parseEventStream`
+  - `chatApiClient`
+  - `useStreamController`
+- Updated `useSendMessage` and `mapStreamEventToPatch`:
+  - persist clarification metadata on `assistant_stream`
+  - store `finishReason`
+  - finalize `done(user_input_required)` as a normal completed assistant message
+- Updated `StreamMessage`, `MessageList`, `Composer`, and `App`:
+  - render clarification cards with option buttons
+  - clicking an option submits it as the next normal user turn
+
+### Tests
+
+- Updated backend tests:
+  - `tests/test_agent_graph.py`
+  - `tests/test_chat_use_cases.py`
+  - `tests/test_event_mapper.py`
+  - `tests/test_tools_registry.py`
+- Updated frontend tests:
+  - `frontend-react/src/__tests__/App.behavior.test.jsx`
+  - `frontend-react/src/__tests__/mapStreamEventToPatch.test.js`
+  - `frontend-react/src/__tests__/stream.test.js`
+  - `frontend-react/src/__tests__/stream.fixtures.test.js`
+  - `frontend-react/src/__tests__/useStreamController.test.jsx`
+
+### Docs
+
+- Updated `docs/assistant/api-and-sse-contract.md`
+- Updated `README.md`
+
 ## 2026-03-10 (Gateway API Key Resolution + CI Test Isolation)
 
 ### Summary

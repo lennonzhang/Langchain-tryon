@@ -30,7 +30,18 @@ function SkeletonMessages() {
   );
 }
 
-const MessageList = forwardRef(function MessageList({ messages, isPending, currentRequestId, onScroll, loading }, ref) {
+const MessageList = forwardRef(function MessageList(
+  {
+    messages,
+    isPending,
+    currentRequestId,
+    onScroll,
+    loading,
+    onSelectClarificationOption,
+    canSubmitClarification = true,
+  },
+  ref,
+) {
   const latestStreamRequestId = [...messages]
     .reverse()
     .find((msg) => msg.role === "assistant_stream" && msg.requestId)?.requestId || null;
@@ -52,6 +63,8 @@ const MessageList = forwardRef(function MessageList({ messages, isPending, curre
               msg={msg}
               showTyping={showTyping}
               isCurrentRequestMessage={isCurrentRequestMessage}
+              onSelectClarificationOption={onSelectClarificationOption}
+              canSubmitClarification={canSubmitClarification}
             />
           );
         }

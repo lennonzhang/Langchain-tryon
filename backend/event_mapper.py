@@ -55,6 +55,7 @@ def stream_agentic(
     search_provider = SearchProvider(run_web_search, _emit_from_agent, cancel_token=cancel_token)
     base_messages = build_messages(model, message, history, "", [])
     emitted_token_parts: list[str] = []
+    interrupted_for_user_input = False
 
     def _run_agent():
         try:
@@ -100,6 +101,8 @@ def stream_agentic(
         except queue.Empty:
             continue
         if isinstance(evt, dict) and evt.get("type"):
+            if evt.get("type") == "user_input_required":
+                interrupted_for_user_input = True
             if evt.get("type") == "token":
                 emitted_token_parts.append(str(evt.get("content") or ""))
             yield evt
@@ -107,6 +110,10 @@ def stream_agentic(
     if state["error"] is not None:
         yield {"type": "error", "error": str(state["error"])}
         yield {"type": "done", "finish_reason": "error"}
+        return
+
+    if interrupted_for_user_input:
+        yield {"type": "done", "finish_reason": "user_input_required"}
         return
 
     # Token events have already been streamed by the agent graph.

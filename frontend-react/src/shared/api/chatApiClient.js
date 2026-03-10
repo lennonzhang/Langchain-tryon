@@ -50,7 +50,7 @@ export async function streamChat(payload, handlers, { signal } = {}) {
 
   const reader = resp.body.getReader();
 
-  await parseEventStream(reader, (event) => handlers.onEvent?.(event));
+  const doneEvent = await parseEventStream(reader, (event) => handlers.onEvent?.(event));
 
-  await Promise.resolve(handlers.onDone?.());
+  await Promise.resolve(handlers.onDone?.(doneEvent || null));
 }

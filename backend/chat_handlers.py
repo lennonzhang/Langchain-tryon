@@ -76,6 +76,16 @@ def _debug_log_stream_event(enabled: bool, rid: str, model: str, event: dict) ->
     if evt in {"tool_call", "tool_result"}:
         _debug_log(True, rid, model, evt, tool=event.get("tool"), step=event.get("step"))
         return
+    if evt == "user_input_required":
+        _debug_log(
+            True,
+            rid,
+            model,
+            evt,
+            step=event.get("step"),
+            preview=f'"{_single_line_preview(event.get("question", ""))}"',
+        )
+        return
     _debug_log(True, rid, model, evt)
 
 

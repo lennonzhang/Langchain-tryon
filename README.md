@@ -138,6 +138,11 @@ Open `http://127.0.0.1:8000`.
 - Media input: kimi only
 - Search events and reasoning/token streams are shown in dedicated sections.
 - Agent reasoning is formatted into readable paragraphs using step-boundary and text heuristics during streaming.
+- Agent-capable models can interrupt a run with a structured clarification question:
+  - the stream emits `user_input_required` (question + up to 3 options + optional free-text), then `done(finish_reason="user_input_required")`
+  - the clarification card uses a violet accent theme with option buttons and an inline free-text input (when `allow_free_text` is true)
+  - the previous clarification card transitions to a dimmed "Answered" state when the user submits a reply; submit is session-scoped (not blocked by other sessions streaming)
+  - a `ToolMessage` is appended to agent state so the tool_call/result pair stays valid for future resumption
 - Markdown code blocks provide copy actions and syntax highlighting (highlighting runs after stream completion).
 - `New chat` enters a draft-only view (no immediate session creation).
 - Switching from unsent draft to an existing session preserves draft text; first send from draft creates a real session and clears draft.
@@ -171,6 +176,7 @@ Expected SSE event types:
 - `token`
 - `error`
 - `done`
+- `user_input_required`
 
 Every event is enriched with:
 
@@ -180,6 +186,7 @@ Every event is enriched with:
 Error invariant:
 
 - `error` is always followed by `done` with `finish_reason: "error"`.
+- clarification interrupt is emitted as `user_input_required` followed by `done` with `finish_reason: "user_input_required"`.
 
 Common error responses:
 

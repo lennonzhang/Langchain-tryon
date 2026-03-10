@@ -41,7 +41,7 @@ MODEL_TEMPLATES: list[dict] = [
         "context_window": 128000,
         "agent_config": {
             "max_steps": 8,
-            "tools": ["web_search", "read_url", "python_exec"],
+            "tools": ["web_search", "read_url", "request_user_input", "python_exec"],
             "enable_planning": True,
             "enable_reflection": True,
         },
@@ -65,7 +65,7 @@ MODEL_TEMPLATES: list[dict] = [
         "context_window": 262144,
         "agent_config": {
             "max_steps": 8,
-            "tools": ["web_search", "read_url", "python_exec"],
+            "tools": ["web_search", "read_url", "request_user_input", "python_exec"],
             "enable_planning": True,
             "enable_reflection": True,
         },
@@ -89,7 +89,7 @@ MODEL_TEMPLATES: list[dict] = [
         "context_window": 128000,
         "agent_config": {
             "max_steps": 8,
-            "tools": ["web_search", "read_url", "python_exec"],
+            "tools": ["web_search", "read_url", "request_user_input", "python_exec"],
             "enable_planning": True,
             "enable_reflection": True,
         },
@@ -111,7 +111,7 @@ MODEL_TEMPLATES: list[dict] = [
         "context_window": 200000,
         "agent_config": {
             "max_steps": 8,
-            "tools": ["web_search", "read_url", "python_exec"],
+            "tools": ["web_search", "read_url", "request_user_input", "python_exec"],
             "enable_planning": True,
             "enable_reflection": True,
         },
@@ -133,7 +133,7 @@ MODEL_TEMPLATES: list[dict] = [
         "context_window": 200000,
         "agent_config": {
             "max_steps": 8,
-            "tools": ["web_search", "read_url", "python_exec"],
+            "tools": ["web_search", "read_url", "request_user_input", "python_exec"],
             "enable_planning": True,
             "enable_reflection": True,
         },
@@ -155,7 +155,7 @@ MODEL_TEMPLATES: list[dict] = [
         "context_window": 1048576,
         "agent_config": {
             "max_steps": 8,
-            "tools": ["web_search", "read_url", "python_exec"],
+            "tools": ["web_search", "read_url", "request_user_input", "python_exec"],
             "enable_planning": True,
             "enable_reflection": True,
         },

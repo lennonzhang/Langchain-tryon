@@ -33,7 +33,7 @@ export async function parseEventStream(reader, onEvent) {
         await Promise.resolve(onEvent(event));
         if (event?.type === "done") {
           await reader.cancel();
-          return;
+          return event;
         }
       }
     }
