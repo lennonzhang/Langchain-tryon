@@ -187,11 +187,13 @@ Common error responses:
 | --- | --- | --- |
 | `POST /api/chat` | invalid JSON / validation failure / missing `message` | `400` JSON error |
 | `POST /api/chat` | payload too large | `413` JSON error |
+| `POST /api/chat` | missing API key / server misconfiguration | `500` JSON error |
 | `POST /api/chat` | active duplicate `request_id` | `409` JSON error |
 | `POST /api/chat` | queue full / queue timeout / shutdown drain | `503` JSON error |
 | `POST /api/chat` | upstream timeout | `504` JSON error |
 | `POST /api/chat` | other upstream failure | `502` JSON error |
 | `POST /api/chat/stream` | invalid JSON / validation failure / payload too large / shutdown drain | non-stream JSON error (`400` / `413` / `503`) |
+| `POST /api/chat/stream` | missing API key / server misconfiguration | SSE `error` then `done(error)` |
 | `POST /api/chat/stream` | queue full / queue timeout / active duplicate `request_id` | SSE `error` then `done(error)` |
 | `POST /api/chat/stream` | upstream timeout / runtime failure after stream starts | SSE `error` then `done(error)` |
 | `POST /api/chat/cancel` | invalid JSON / missing or invalid `request_id` | `400` JSON error |

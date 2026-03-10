@@ -2,6 +2,31 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-10 (Gateway API Key Resolution + CI Test Isolation)
+
+### Summary
+
+Made gateway API-key resolution explicit at request time so missing server credentials return deterministic route errors, and hardened gateway tests to patch the API-key helper instead of patching internal module state.
+
+### Backend
+
+- Updated `backend/gateway/app.py`:
+  - replaced module-import API key capture with `_gateway_api_key()`
+  - missing API key now returns `500` JSON for `POST /api/chat`
+  - missing API key now emits SSE `error` then `done(error)` for `POST /api/chat/stream`
+
+### Tests
+
+- Updated `tests/test_gateway_app.py`:
+  - patch `_gateway_api_key()` instead of `_API_KEY`
+  - duplicate `request_id` tests no longer depend on ambient env state
+  - added explicit missing-API-key coverage for both chat and stream routes
+
+### Docs
+
+- Updated `docs/assistant/api-and-sse-contract.md`
+- Updated `README.md`
+
 ## 2026-03-10 (Stream Init Error Handling + Active Request ID Guard + Empty Model Selector)
 
 ### Summary

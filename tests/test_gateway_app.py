@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.domain.execution import DuplicateRequestIdError
 from backend.gateway import app as gateway_app_module
+from backend.gateway.app import GatewayConfigurationError
 from backend.gateway.admission import QueueFullError, QueueTimeoutError
 from backend.gateway.app import app
 
@@ -16,7 +17,7 @@ class TestGatewayApp(unittest.TestCase):
         app.state.debug_stream = False
         app.state.shutdown_requested = False
         self._too_long_request_id = "r" * 257
-        self._api_key_patcher = patch.object(gateway_app_module, "_API_KEY", "test-api-key", create=True)
+        self._api_key_patcher = patch("backend.gateway.app._gateway_api_key", return_value="test-api-key")
         self._api_key_patcher.start()
         self.addCleanup(self._api_key_patcher.stop)
 
@@ -88,10 +89,24 @@ class TestGatewayApp(unittest.TestCase):
         with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
             gate.slot.return_value.__aenter__ = AsyncMock(return_value=None)
             gate.slot.return_value.__aexit__ = AsyncMock(return_value=False)
-            with patch("backend.gateway.app.chat_once", side_effect=DuplicateRequestIdError("rid-duplicate")):
+            with patch("backend.gateway.app.asyncio.to_thread", side_effect=DuplicateRequestIdError("rid-duplicate")):
                 response = self.client.post("/api/chat", json=payload)
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json(), {"error": "request_id already active"})
+
+    def test_chat_route_returns_500_when_api_key_missing(self):
+        payload = {"message": "hello", "request_id": "rid-misconfigured-chat"}
+        self._api_key_patcher.stop()
+        with patch(
+            "backend.gateway.app._gateway_api_key",
+            side_effect=GatewayConfigurationError("Server misconfigured: No API key found. Set NVIDIA_API_KEY in system env or .env."),
+        ):
+            response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {"error": "Server misconfigured: No API key found. Set NVIDIA_API_KEY in system env or .env."},
+        )
 
     def test_chat_route_rejects_too_long_request_id(self):
         response = self.client.post("/api/chat", json={"message": "hello", "request_id": self._too_long_request_id})
@@ -152,6 +167,21 @@ class TestGatewayApp(unittest.TestCase):
         body = response.text
         self.assertIn('"type": "error"', body)
         self.assertIn('"error": "request_id already active"', body)
+        self.assertIn('"type": "done"', body)
+        self.assertIn('"finish_reason": "error"', body)
+
+    def test_chat_stream_missing_api_key_emits_error_and_done(self):
+        payload = {"message": "hello", "request_id": "rid-stream-misconfigured"}
+        self._api_key_patcher.stop()
+        with patch(
+            "backend.gateway.app._gateway_api_key",
+            side_effect=GatewayConfigurationError("Server misconfigured: No API key found. Set NVIDIA_API_KEY in system env or .env."),
+        ):
+            response = self.client.post("/api/chat/stream", json=payload)
+        self.assertEqual(response.status_code, 200)
+        body = response.text
+        self.assertIn('"type": "error"', body)
+        self.assertIn('"error": "Server misconfigured: No API key found. Set NVIDIA_API_KEY in system env or .env."', body)
         self.assertIn('"type": "done"', body)
         self.assertIn('"finish_reason": "error"', body)
 

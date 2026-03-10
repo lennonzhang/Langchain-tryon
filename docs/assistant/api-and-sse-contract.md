@@ -46,12 +46,14 @@ Fields:
 
 - `POST /api/chat`
   - validation failures return JSON errors (`400` / `413`)
+  - missing API key / server misconfiguration returns `500`
   - active duplicate `request_id` returns `409`
   - gateway saturation and shutdown gate return `503`
   - upstream timeout returns `504`
   - other upstream/runtime failure returns `502`
 - `POST /api/chat/stream`
   - request parsing failures return JSON errors before the stream starts
+  - missing API key / server misconfiguration is reported in-band as `error` then `done(error)`
   - once streaming is established, terminal failures are reported in-band as `error` then `done(error)`
 - `POST /api/chat/cancel`
   - request parsing failures return JSON errors (`400` / `413`)

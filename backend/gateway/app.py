@@ -19,7 +19,6 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 
 app = FastAPI()
-_API_KEY = load_api_key(BASE_DIR)
 _ADMISSION_GATE = AdmissionGate.from_env()
 app.state.debug_stream = False
 app.state.shutdown_requested = False
@@ -48,6 +47,10 @@ class MissingMessageError(GatewayRequestError):
     pass
 
 
+class GatewayConfigurationError(GatewayRequestError):
+    pass
+
+
 def _content_length(request: Request) -> int | None:
     raw = request.headers.get("content-length")
     if raw is None:
@@ -72,6 +75,13 @@ def _validate_request_id(value: object, *, required: bool) -> str | None:
 
 def _json_error(status: int, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": message})
+
+
+def _gateway_api_key() -> str:
+    try:
+        return load_api_key(BASE_DIR)
+    except RuntimeError as exc:
+        raise GatewayConfigurationError(f"Server misconfigured: {exc}") from exc
 
 
 def _enrich_event(payload: dict, request_id: str | None = None) -> str:
@@ -151,10 +161,11 @@ async def post_chat(request: Request):
         return _json_error(400, str(exc))
 
     try:
+        api_key = _gateway_api_key()
         async with _ADMISSION_GATE.slot():
             answer = await asyncio.to_thread(
                 chat_once,
-                _API_KEY,
+                api_key,
                 req.message,
                 req.history,
                 req.model,
@@ -165,6 +176,8 @@ async def post_chat(request: Request):
                 request_id=req.request_id,
                 debug_stream=bool(getattr(app.state, "debug_stream", False)),
             )
+    except GatewayConfigurationError as exc:
+        return _json_error(500, str(exc))
     except (QueueFullError, QueueTimeoutError) as exc:
         return JSONResponse(status_code=503, content={"error": str(exc)})
     except DuplicateRequestIdError as exc:
@@ -192,6 +205,11 @@ async def post_chat_stream(request: Request):
         return _json_error(400, str(exc))
 
     try:
+        api_key = _gateway_api_key()
+    except GatewayConfigurationError as exc:
+        return _stream_error_response(str(exc), req.request_id)
+
+    try:
         await _ADMISSION_GATE.acquire()
     except QueueFullError as exc:
         return _stream_error_response(str(exc), req.request_id)
@@ -200,7 +218,7 @@ async def post_chat_stream(request: Request):
 
     def build_stream():
         return stream_chat(
-            _API_KEY,
+            api_key,
             req.message,
             req.history,
             req.model,
