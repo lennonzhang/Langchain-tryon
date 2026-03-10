@@ -1,22 +1,16 @@
-import { useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect } from "react";
 import SessionList from "./SessionList";
 
 const FILTER_DEBOUNCE_MS = 200;
-const MOBILE_MEDIA_QUERY = "(max-width: 600px)";
 
-function isMobileViewport() {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return false;
-  }
-  return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
-}
-
-export default function SessionSidebar({
+function SessionSidebar({
+  sidebarRef,
   sessions,
   activeSessionId,
   runningSessionId,
   filter,
   isOpen,
+  overlayMode = false,
   onToggle,
   onClose,
   onFilterChange,
@@ -47,54 +41,57 @@ export default function SessionSidebar({
     onFilterChange("");
   }
 
-  function closeOnMobile() {
-    if (!isMobileViewport()) return;
+  function closeOnOverlay() {
+    if (!overlayMode) return;
     onClose?.();
   }
 
   function handleCreateNew() {
     onCreateNew();
-    closeOnMobile();
+    closeOnOverlay();
   }
 
   function handleSelect(sessionId) {
     onSelect(sessionId);
-    closeOnMobile();
+    closeOnOverlay();
   }
 
   return (
     <>
-      {isOpen && (
+      {overlayMode && isOpen && (
         <div
           className="sidebar-backdrop"
           onClick={onClose || onToggle}
           aria-hidden="true"
         />
       )}
-      <aside id="session-sidebar" className={`session-sidebar ${isOpen ? "is-open" : ""}`}>
+      <aside
+        ref={sidebarRef}
+        id="session-sidebar"
+        className={`session-sidebar ${isOpen ? "is-open" : ""}`}
+      >
         <div className="session-header">
           <div className="session-header-text">
-            <div className="session-kicker">Workspace</div>
             <h2>Sessions</h2>
             <p className="session-count">
               {sessions.length} conversation{sessions.length === 1 ? "" : "s"}
             </p>
           </div>
-          <button type="button" className="session-new session-new-primary" onClick={handleCreateNew}>
-            + New Chat
+          <button
+            type="button"
+            className="session-close"
+            aria-label="Close sessions panel"
+            onClick={onClose || onToggle}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div className="session-toolbar">
-          <button type="button" className="session-toggle" onClick={onToggle} aria-label="Toggle sessions">
-            Toggle
-          </button>
           <div className="session-filter-wrap">
-            <span className="session-filter-icon" aria-hidden="true">
-              Search
-            </span>
+            <svg className="session-filter-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input
               className="session-filter"
-              placeholder="Search sessions"
+              placeholder="Search sessions..."
               value={localFilter}
               onChange={(event) => handleFilterInput(event.target.value)}
             />
@@ -105,17 +102,17 @@ export default function SessionSidebar({
                 aria-label="Clear filter"
                 onClick={handleClearFilter}
               >
-                Clear
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             )}
           </div>
         </div>
-        <div className="session-list-hint">Recent activity first</div>
         <SessionList
           sessions={sessions}
           activeSessionId={activeSessionId}
           runningSessionId={runningSessionId}
           filter={localFilter}
+          onCreateNew={handleCreateNew}
           onSelect={handleSelect}
           onDelete={onDelete}
         />
@@ -123,3 +120,5 @@ export default function SessionSidebar({
     </>
   );
 }
+
+export default memo(SessionSidebar);

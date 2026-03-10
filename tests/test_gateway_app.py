@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
+from backend.domain.execution import DuplicateRequestIdError
 from backend.gateway import app as gateway_app_module
+from backend.gateway.app import GatewayConfigurationError
 from backend.gateway.admission import QueueFullError, QueueTimeoutError
 from backend.gateway.app import app
 
@@ -13,7 +15,11 @@ class TestGatewayApp(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
         app.state.debug_stream = False
+        app.state.shutdown_requested = False
         self._too_long_request_id = "r" * 257
+        self._api_key_patcher = patch("backend.gateway.app._gateway_api_key", return_value="test-api-key")
+        self._api_key_patcher.start()
+        self.addCleanup(self._api_key_patcher.stop)
 
     def test_capabilities_route(self):
         response = self.client.get("/api/capabilities")
@@ -78,10 +84,40 @@ class TestGatewayApp(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {"error": "gateway queue timeout"})
 
+    def test_chat_route_returns_409_for_duplicate_active_request_id(self):
+        payload = {"message": "hello", "request_id": "rid-duplicate"}
+        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
+            gate.slot.return_value.__aenter__ = AsyncMock(return_value=None)
+            gate.slot.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch("backend.gateway.app.asyncio.to_thread", side_effect=DuplicateRequestIdError("rid-duplicate")):
+                response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json(), {"error": "request_id already active"})
+
+    def test_chat_route_returns_500_when_api_key_missing(self):
+        payload = {"message": "hello", "request_id": "rid-misconfigured-chat"}
+        self._api_key_patcher.stop()
+        with patch(
+            "backend.gateway.app._gateway_api_key",
+            side_effect=GatewayConfigurationError("Server misconfigured: No API key found. Set NVIDIA_API_KEY in system env or .env."),
+        ):
+            response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {"error": "Server misconfigured: No API key found. Set NVIDIA_API_KEY in system env or .env."},
+        )
+
     def test_chat_route_rejects_too_long_request_id(self):
         response = self.client.post("/api/chat", json={"message": "hello", "request_id": self._too_long_request_id})
         self.assertEqual(response.status_code, 400)
         self.assertIn("request_id: too long", response.json()["error"])
+
+    def test_chat_route_returns_503_while_shutdown_requested(self):
+        app.state.shutdown_requested = True
+        response = self.client.post("/api/chat", json={"message": "hello", "request_id": "rid-shutdown-chat"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"error": "Server shutting down"})
 
     def test_chat_route_content_length_precheck_returns_413(self):
         payload = {"message": "hello", "request_id": "rid-precheck"}
@@ -117,10 +153,48 @@ class TestGatewayApp(unittest.TestCase):
         self.assertIn('"finish_reason": "error"', body)
         self.assertIn('"request_id": "rid-stream-queue-timeout"', body)
 
+    def test_chat_stream_duplicate_request_id_emits_error_and_done(self):
+        payload = {"message": "hello", "request_id": "rid-stream-duplicate"}
+        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
+            gate.acquire = AsyncMock(return_value=None)
+            gate.release = AsyncMock(return_value=None)
+            with patch(
+                "backend.gateway.app.stream_chat",
+                side_effect=DuplicateRequestIdError("rid-stream-duplicate"),
+            ):
+                response = self.client.post("/api/chat/stream", json=payload)
+        self.assertEqual(response.status_code, 200)
+        body = response.text
+        self.assertIn('"type": "error"', body)
+        self.assertIn('"error": "request_id already active"', body)
+        self.assertIn('"type": "done"', body)
+        self.assertIn('"finish_reason": "error"', body)
+
+    def test_chat_stream_missing_api_key_emits_error_and_done(self):
+        payload = {"message": "hello", "request_id": "rid-stream-misconfigured"}
+        self._api_key_patcher.stop()
+        with patch(
+            "backend.gateway.app._gateway_api_key",
+            side_effect=GatewayConfigurationError("Server misconfigured: No API key found. Set NVIDIA_API_KEY in system env or .env."),
+        ):
+            response = self.client.post("/api/chat/stream", json=payload)
+        self.assertEqual(response.status_code, 200)
+        body = response.text
+        self.assertIn('"type": "error"', body)
+        self.assertIn('"error": "Server misconfigured: No API key found. Set NVIDIA_API_KEY in system env or .env."', body)
+        self.assertIn('"type": "done"', body)
+        self.assertIn('"finish_reason": "error"', body)
+
     def test_chat_stream_rejects_too_long_request_id(self):
         response = self.client.post("/api/chat/stream", json={"message": "hello", "request_id": self._too_long_request_id})
         self.assertEqual(response.status_code, 400)
         self.assertIn("request_id: too long", response.json()["error"])
+
+    def test_chat_stream_returns_503_while_shutdown_requested(self):
+        app.state.shutdown_requested = True
+        response = self.client.post("/api/chat/stream", json={"message": "hello", "request_id": "rid-shutdown-stream"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"error": "Server shutting down"})
 
     def test_chat_route_forwards_debug_stream_flag(self):
         payload = {"message": "hello", "request_id": "rid-debug"}
@@ -128,7 +202,7 @@ class TestGatewayApp(unittest.TestCase):
         with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
             gate.slot.return_value.__aenter__ = AsyncMock(return_value=None)
             gate.slot.return_value.__aexit__ = AsyncMock(return_value=False)
-            with patch("backend.gateway.app.load_api_key", return_value="test-key"):
+            with patch("backend.gateway.app._gateway_api_key", return_value="test-key"):
                 with patch("backend.gateway.app.chat_once", return_value="ok") as chat_once_mock:
                     response = self.client.post("/api/chat", json=payload)
         self.assertEqual(response.status_code, 200)
@@ -142,50 +216,35 @@ class TestGatewayApp(unittest.TestCase):
         with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
             gate.acquire = AsyncMock(return_value=None)
             gate.release = AsyncMock(return_value=None)
-            with patch("backend.gateway.app.load_api_key", return_value="test-key"):
+            with patch("backend.gateway.app._gateway_api_key", return_value="test-key"):
                 with patch("backend.gateway.app.stream_chat", return_value=iter([{"type": "done", "finish_reason": "stop"}])) as stream_chat_mock:
                     response = self.client.post("/api/chat/stream", json=payload)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(stream_chat_mock.call_args.kwargs["debug_stream"])
         self.assertEqual(stream_chat_mock.call_args.args[0], "test-key")
 
-    def test_chat_route_returns_500_when_api_key_missing(self):
-        payload = {"message": "hello", "request_id": "rid-missing-key"}
-        with patch("backend.gateway.app.load_api_key", side_effect=RuntimeError("No API key found. Set NVIDIA_API_KEY in system env or .env.")):
-            response = self.client.post("/api/chat", json=payload)
-        self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["error"], "Server misconfigured")
-        self.assertIn("No API key found", response.json()["detail"])
-
     def test_chat_route_runtime_error_still_maps_to_502(self):
         payload = {"message": "hello", "request_id": "rid-runtime-error"}
         with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
             gate.slot.return_value.__aenter__ = AsyncMock(return_value=None)
             gate.slot.return_value.__aexit__ = AsyncMock(return_value=False)
-            with patch("backend.gateway.app.load_api_key", return_value="test-key"):
+            with patch("backend.gateway.app._gateway_api_key", return_value="test-key"):
                 with patch("backend.gateway.app.chat_once", side_effect=RuntimeError("provider=openai | protocol=openai_responses | message=boom")):
                     response = self.client.post("/api/chat", json=payload)
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json()["error"], "Upstream request failed")
         self.assertIn("provider=openai", response.json()["detail"])
 
-    def test_chat_stream_missing_api_key_emits_error_and_done(self):
-        payload = {"message": "hello", "request_id": "rid-stream-missing-key"}
-        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
-            gate.acquire = AsyncMock(return_value=None)
-            gate.release = AsyncMock(return_value=None)
-            with patch("backend.gateway.app.load_api_key", side_effect=RuntimeError("No API key found. Set NVIDIA_API_KEY in system env or .env.")):
-                response = self.client.post("/api/chat/stream", json=payload)
-        self.assertEqual(response.status_code, 200)
-        body = response.text
-        self.assertIn('"type": "error"', body)
-        self.assertIn('"error": "Server misconfigured: No API key found.', body)
-        self.assertIn('"type": "done"', body)
-        self.assertIn('"finish_reason": "error"', body)
-        self.assertIn('"request_id": "rid-stream-missing-key"', body)
-
     def test_frontend_route_blocks_path_traversal(self):
         with patch.object(gateway_app_module, "FRONTEND_DIST_DIR", Path.cwd()):
             response = self.client.get("/..%2FREADME.md")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"error": "Forbidden"})
+
+    def test_cancel_route_stays_available_while_shutdown_requested(self):
+        app.state.shutdown_requested = True
+        with patch("backend.gateway.app.cancel_chat", return_value={"cancelled": True}) as cancel_mock:
+            response = self.client.post("/api/chat/cancel", json={"request_id": "rid-shutdown-cancel"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"cancelled": True})
+        cancel_mock.assert_called_once_with("rid-shutdown-cancel")

@@ -34,10 +34,18 @@ pnpm test:e2e
 - OpenAI Responses `400`:
   - check that top-level `temperature` / `top_p` are not sent
   - check that `reasoning` is always present
+- OpenAI Responses read timeout / long quiet stream:
+  - check `OPENAI_SSE_READ_TIMEOUT_SECONDS` (default `600`) separately from `OPENAI_TIMEOUT_SECONDS`
+  - transport timeouts should surface through the normal timeout path instead of a generic normalized upstream error
+- OpenAI lifecycle fallback looks incomplete:
+  - repeated `response.output_item.added` snapshots should merge by item identity
+  - when `output_index` is missing, fallback ordering should follow first-seen order
 - Missing stream completion:
   - verify error invariant `error` then `done(error)`
 - Stop does not reduce backend work:
   - verify frontend hits `POST /api/chat/cancel` before aborting local fetch
+- Local `Ctrl+C` exits too early or keeps accepting requests:
+  - verify `python server.py` is using the graceful shutdown path and check `SHUTDOWN_CANCEL_DRAIN_SECONDS`
 - Cross-session stream bleed:
   - verify frontend isolation by `sessionId + requestId`
 - Web page loading timeout/failure:
@@ -59,6 +67,10 @@ L3 deep index:
 
 - Path index: [`docs/assistant/path-index.md`](docs/assistant/path-index.md)
 - Validation + release checklist: [`docs/assistant/validation-and-release-checklist.md`](docs/assistant/validation-and-release-checklist.md)
+
+L4 detailed references:
+
+- Error status matrix: [`docs/assistant/error-status-matrix.md`](docs/assistant/error-status-matrix.md)
 
 ## Fast Invariants
 

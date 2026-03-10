@@ -1,14 +1,19 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoFollowScroll } from "../hooks/useAutoFollowScroll";
 
-function Harness({ tick }) {
+function Harness({ tick, extraContent = false }) {
   const { containerRef, handleScroll } = useAutoFollowScroll({
     thresholdPx: 150,
     watchValue: tick,
   });
 
-  return <div data-testid="messages-list" ref={containerRef} onScroll={handleScroll} />;
+  return (
+    <div data-testid="messages-list" ref={containerRef} onScroll={handleScroll}>
+      <div>base content</div>
+      {extraContent && <div>async rendered content</div>}
+    </div>
+  );
 }
 
 function attachScrollMetrics(element, { scrollHeight = 0, clientHeight = 0, scrollTop = 0 } = {}) {
@@ -123,5 +128,24 @@ describe("useAutoFollowScroll", () => {
     view.rerender(<Harness tick={2} />);
 
     expect(metrics.readScrollTop()).toBe(780);
+  });
+
+  it("keeps sticking to the bottom when DOM content grows after the watched value stops changing", async () => {
+    const view = render(<Harness tick={1} extraContent={false} />);
+    const list = screen.getByTestId("messages-list");
+    const metrics = attachScrollMetrics(list, {
+      scrollHeight: 500,
+      clientHeight: 200,
+      scrollTop: 300,
+    });
+
+    fireEvent.scroll(list);
+
+    metrics.setMetrics({ scrollHeight: 650 });
+    view.rerender(<Harness tick={1} extraContent={true} />);
+
+    await waitFor(() => {
+      expect(metrics.readScrollTop()).toBe(650);
+    });
   });
 });

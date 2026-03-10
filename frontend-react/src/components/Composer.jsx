@@ -1,7 +1,8 @@
+import { memo } from "react";
 import ModelSelect from "./ModelSelect";
 import AttachStrip from "./AttachStrip";
 
-export default function Composer({
+function Composer({
   models,
   model,
   onModelChange,
@@ -28,41 +29,6 @@ export default function Composer({
 
   return (
     <form className="composer" onSubmit={onSubmit}>
-      <div className="settings-card">
-        <div className="model-field">
-          <span className="model-field-label">Model</span>
-          <ModelSelect models={models} value={model} disabled={isPending} onChange={onModelChange} />
-        </div>
-
-        <div className="toggles" role="group" aria-label="chat options">
-          <label className="toggle" htmlFor="searchToggle">
-            <input
-              type="checkbox"
-              id="searchToggle"
-              checked={webSearch}
-              disabled={isPending}
-              onChange={(event) => onWebSearchChange(event.target.checked)}
-            />
-            <span className="toggle-track" aria-hidden="true" />
-            <span className="toggle-label">Web Search</span>
-          </label>
-
-          {supportsThinking && (
-            <label className="toggle" htmlFor="thinkingToggle">
-              <input
-                type="checkbox"
-                id="thinkingToggle"
-                checked={thinkingMode}
-                disabled={isPending}
-                onChange={(event) => onThinkingModeChange(event.target.checked)}
-              />
-              <span className="toggle-track" aria-hidden="true" />
-              <span className="toggle-label">Thinking Mode</span>
-            </label>
-          )}
-        </div>
-      </div>
-
       <div className="input-shell">
         {supportsMedia && (
           <AttachStrip
@@ -79,7 +45,7 @@ export default function Composer({
             id="input"
             value={input}
             disabled={isPending}
-            placeholder={pendingHint || "Press Enter to send (Shift+Enter for newline)"}
+            placeholder={pendingHint || "Type a message... (Enter to send, Shift+Enter for newline)"}
             required
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={(event) => {
@@ -109,7 +75,23 @@ export default function Composer({
             )}
           </button>
         </div>
+
+        <div className="settings-card">
+          <ModelSelect
+            models={models}
+            value={model}
+            disabled={isPending}
+            onChange={onModelChange}
+            webSearch={webSearch}
+            onWebSearchChange={onWebSearchChange}
+            supportsThinking={supportsThinking}
+            thinkingMode={thinkingMode}
+            onThinkingModeChange={onThinkingModeChange}
+          />
+        </div>
       </div>
     </form>
   );
 }
+
+export default memo(Composer);

@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from backend.config import load_api_key
+from backend.domain.execution import DuplicateRequestIdError
 from backend.model_registry import capabilities_response
 from backend.nvidia_client import cancel_chat, chat_once, stream_chat
 from backend.schemas import ChatRequest, ValidationError
@@ -20,8 +21,10 @@ FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 app = FastAPI()
 _ADMISSION_GATE = AdmissionGate.from_env()
 app.state.debug_stream = False
+app.state.shutdown_requested = False
 _MAX_JSON_BODY = 10 * 1024 * 1024
 _MAX_REQUEST_ID_CHARS = ChatRequest._MAX_REQUEST_ID_CHARS
+_SHUTDOWN_MESSAGE = "Server shutting down"
 
 
 class GatewayRequestError(Exception):
@@ -41,6 +44,10 @@ class RequestValidationError(GatewayRequestError):
 
 
 class MissingMessageError(GatewayRequestError):
+    pass
+
+
+class GatewayConfigurationError(GatewayRequestError):
     pass
 
 
@@ -70,8 +77,11 @@ def _json_error(status: int, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": message})
 
 
-def _configuration_error(message: str) -> JSONResponse:
-    return JSONResponse(status_code=500, content={"error": "Server misconfigured", "detail": message[:500]})
+def _gateway_api_key() -> str:
+    try:
+        return load_api_key(BASE_DIR)
+    except RuntimeError as exc:
+        raise GatewayConfigurationError(f"Server misconfigured: {exc}") from exc
 
 
 def _enrich_event(payload: dict, request_id: str | None = None) -> str:
@@ -118,10 +128,6 @@ def _stream_error_response(message: str, request_id: str | None) -> StreamingRes
     )
 
 
-def _require_api_key() -> str:
-    return load_api_key(BASE_DIR)
-
-
 def _safe_frontend_target(rel_path: str) -> tuple[Path | None, int | None]:
     frontend_root = FRONTEND_DIST_DIR.resolve()
     if rel_path in {"", "/"}:
@@ -141,6 +147,8 @@ def _safe_frontend_target(rel_path: str) -> tuple[Path | None, int | None]:
 
 @app.post("/api/chat")
 async def post_chat(request: Request):
+    if bool(getattr(app.state, "shutdown_requested", False)):
+        return _json_error(503, _SHUTDOWN_MESSAGE)
     try:
         req = await _parse_chat_request(request)
     except PayloadTooLargeError:
@@ -153,11 +161,8 @@ async def post_chat(request: Request):
         return _json_error(400, str(exc))
 
     try:
+        api_key = _gateway_api_key()
         async with _ADMISSION_GATE.slot():
-            try:
-                api_key = _require_api_key()
-            except RuntimeError as exc:
-                return _configuration_error(str(exc))
             answer = await asyncio.to_thread(
                 chat_once,
                 api_key,
@@ -171,8 +176,12 @@ async def post_chat(request: Request):
                 request_id=req.request_id,
                 debug_stream=bool(getattr(app.state, "debug_stream", False)),
             )
+    except GatewayConfigurationError as exc:
+        return _json_error(500, str(exc))
     except (QueueFullError, QueueTimeoutError) as exc:
         return JSONResponse(status_code=503, content={"error": str(exc)})
+    except DuplicateRequestIdError as exc:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
     except TimeoutError as exc:
         return JSONResponse(status_code=504, content={"error": "Upstream request timeout", "detail": str(exc)[:500]})
     except Exception as exc:  # noqa: BLE001
@@ -182,6 +191,8 @@ async def post_chat(request: Request):
 
 @app.post("/api/chat/stream")
 async def post_chat_stream(request: Request):
+    if bool(getattr(app.state, "shutdown_requested", False)):
+        return _json_error(503, _SHUTDOWN_MESSAGE)
     try:
         req = await _parse_chat_request(request)
     except PayloadTooLargeError:
@@ -194,6 +205,11 @@ async def post_chat_stream(request: Request):
         return _json_error(400, str(exc))
 
     try:
+        api_key = _gateway_api_key()
+    except GatewayConfigurationError as exc:
+        return _stream_error_response(str(exc), req.request_id)
+
+    try:
         await _ADMISSION_GATE.acquire()
     except QueueFullError as exc:
         return _stream_error_response(str(exc), req.request_id)
@@ -201,10 +217,10 @@ async def post_chat_stream(request: Request):
         return _stream_error_response(str(exc), req.request_id)
 
     try:
-        api_key = _require_api_key()
-    except RuntimeError as exc:
+        api_key = _gateway_api_key()
+    except GatewayConfigurationError as exc:
         await _ADMISSION_GATE.release()
-        return _stream_error_response(f"Server misconfigured: {str(exc)[:500]}", req.request_id)
+        return _stream_error_response(str(exc), req.request_id)
 
     def build_stream():
         return stream_chat(
@@ -229,6 +245,9 @@ async def post_chat_stream(request: Request):
                 yield _enrich_event(event, request_id=req.request_id)
         except TimeoutError as exc:
             yield _enrich_event({"type": "error", "error": f"Upstream request timeout: {str(exc)[:500]}"}, req.request_id)
+            yield _enrich_event({"type": "done", "finish_reason": "error"}, req.request_id)
+        except DuplicateRequestIdError as exc:
+            yield _enrich_event({"type": "error", "error": str(exc)}, req.request_id)
             yield _enrich_event({"type": "done", "finish_reason": "error"}, req.request_id)
         except Exception as exc:  # noqa: BLE001
             yield _enrich_event({"type": "error", "error": str(exc)}, req.request_id)

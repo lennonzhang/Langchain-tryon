@@ -10,6 +10,12 @@
 - `POST /api/chat/cancel`
 - `GET /api/capabilities`
 
+During local `python server.py` shutdown drain:
+
+- `POST /api/chat` returns `503`
+- `POST /api/chat/stream` returns `503`
+- `POST /api/chat/cancel` remains available
+
 ## Request Payload
 
 Fields:
@@ -28,10 +34,34 @@ Fields:
 - JSON body max size: `10 MB` (`413` if exceeded)
 - `message` max length: `100000` chars (`400 ValidationError` if exceeded)
 - `request_id` max length: `256` chars (`400 ValidationError` if exceeded)
+- `request_id` must be unique among active top-level requests:
+  - `POST /api/chat` returns `409` with `error: "request_id already active"`
+  - `POST /api/chat/stream` keeps the stream contract and emits `error` then `done(error)`
 - `history` max items: `100` (silently trimmed)
 - `history` items must be `{role: str, content: str}` (invalid items are filtered out)
 - `images` max items: `10` (silently trimmed)
 - `images` items must be strings (invalid items are filtered out)
+
+## Error Responses
+
+- `POST /api/chat`
+  - validation failures return JSON errors (`400` / `413`)
+  - missing API key / server misconfiguration returns `500`
+  - active duplicate `request_id` returns `409`
+  - gateway saturation and shutdown gate return `503`
+  - upstream timeout returns `504`
+  - other upstream/runtime failure returns `502`
+- `POST /api/chat/stream`
+  - request parsing failures return JSON errors before the stream starts
+  - missing API key / server misconfiguration is reported in-band as `error` then `done(error)`
+  - once streaming is established, terminal failures are reported in-band as `error` then `done(error)`
+- `POST /api/chat/cancel`
+  - request parsing failures return JSON errors (`400` / `413`)
+  - missing requests still return `200` with `{"cancelled": false, "reason": "request_not_found"}`
+
+Full matrix:
+
+- [Error Status Matrix](./error-status-matrix.md)
 
 ## Core SSE Events
 
@@ -68,9 +98,10 @@ Fields:
 
 ## Related
 
-Deeper reference (L3):
+Deeper references:
 
 - [Path index](./path-index.md)
+- [Error status matrix](./error-status-matrix.md)
 
 Sibling rules (L2):
 

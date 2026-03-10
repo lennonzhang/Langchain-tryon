@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { useShallow } from "zustand";
 import { useAttachments } from "./hooks/useAttachments";
 import { useAutoFollowScroll } from "./hooks/useAutoFollowScroll";
+import { useResponsiveSessionSidebar } from "./hooks/useResponsiveSessionSidebar";
 import MessageList from "./components/MessageList";
 import Composer from "./components/Composer";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -25,18 +27,26 @@ function AppContent() {
 
   const sessionListQuery = useSessionListQuery();
   const sessions = sessionListQuery.data || [];
+  const { appShellRef, sidebarRef, isSessionOverlay } = useResponsiveSessionSidebar();
 
-  const sidebarOpen = useChatUiStore((state) => state.sidebarOpen);
-  const filter = useChatUiStore((state) => state.filter);
-  const activeSessionId = useChatUiStore((state) => state.activeSessionId);
-  const draftsBySessionId = useChatUiStore((state) => state.draftsBySessionId);
-  const requestIdBySessionId = useChatUiStore((state) => state.requestIdBySessionId);
-  const toggleSidebar = useChatUiStore((state) => state.toggleSidebar);
-  const setSidebarOpen = useChatUiStore((state) => state.setSidebarOpen);
-  const setFilter = useChatUiStore((state) => state.setFilter);
-  const setActiveSessionId = useChatUiStore((state) => state.setActiveSessionId);
-  const setDraft = useChatUiStore((state) => state.setDraft);
-  const reset = useChatUiStore((state) => state.reset);
+  const {
+    sidebarOpen, filter, activeSessionId, draftsBySessionId, requestIdBySessionId,
+    toggleSidebar, setSidebarOpen, setFilter, setActiveSessionId, setDraft, reset,
+  } = useChatUiStore(
+    useShallow((state) => ({
+      sidebarOpen: state.sidebarOpen,
+      filter: state.filter,
+      activeSessionId: state.activeSessionId,
+      draftsBySessionId: state.draftsBySessionId,
+      requestIdBySessionId: state.requestIdBySessionId,
+      toggleSidebar: state.toggleSidebar,
+      setSidebarOpen: state.setSidebarOpen,
+      setFilter: state.setFilter,
+      setActiveSessionId: state.setActiveSessionId,
+      setDraft: state.setDraft,
+      reset: state.reset,
+    }))
+  );
 
   useEffect(() => {
     return () => {
@@ -49,6 +59,12 @@ function AppContent() {
       setActiveSessionId(sessions[0].id);
     }
   }, [activeSessionId, sessions, setActiveSessionId]);
+
+  useEffect(() => {
+    if (!isSessionOverlay && sidebarOpen) {
+      setSidebarOpen(false);
+    }
+  }, [isSessionOverlay, setSidebarOpen, sidebarOpen]);
 
   const activeSessionQuery = useSessionDetailQuery(activeSessionId);
   const isDraftSession = activeSessionId === NEW_SESSION_KEY;
@@ -75,6 +91,7 @@ function AppContent() {
     activeSessionId !== NEW_SESSION_KEY &&
     activeSessionId === runningSessionId;
   const isSessionStreaming = isActiveRunningSession;
+  const isSidebarOpen = isSessionOverlay && sidebarOpen;
   const currentRequestId =
     activeSessionId && activeSessionId !== NEW_SESSION_KEY ? requestIdBySessionId[activeSessionId] || null : null;
   const messages = activeSession?.messages?.length
@@ -100,15 +117,24 @@ function AppContent() {
       setActiveSessionId(null);
     }
   }, [deleteSessionMutation, setActiveSessionId]);
+  const handleInputChange = useCallback(
+    (value) => setDraft(activeSessionId, value),
+    [setDraft, activeSessionId]
+  );
 
   return (
-    <div className="app-shell">
+    <div
+      ref={appShellRef}
+      className={`app-shell ${isSessionOverlay ? "is-session-overlay" : ""}`}
+    >
       <SessionSidebar
+        sidebarRef={sidebarRef}
         sessions={sessions}
         activeSessionId={activeSessionId}
         runningSessionId={runningSessionId}
         filter={filter}
-        isOpen={sidebarOpen}
+        isOpen={isSidebarOpen}
+        overlayMode={isSessionOverlay}
         onToggle={handleToggleSidebar}
         onClose={handleCloseSidebar}
         onFilterChange={setFilter}
@@ -125,19 +151,19 @@ function AppContent() {
               className="header-sessions-btn"
               onClick={handleOpenSidebar}
               aria-controls="session-sidebar"
-              aria-expanded={sidebarOpen}
+              aria-expanded={isSidebarOpen}
               aria-label="Open sessions panel"
             >
-              Sessions
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
             </button>
             <div className="header-copy">
-              <h1>Chat Workspace</h1>
-              <p>Session-based streaming chat.</p>
+              <h1>{isDraftSession ? "New Chat" : activeSession?.title || "Chat"}</h1>
+              <p>{shortModelName(model)}</p>
             </div>
           </div>
         </header>
 
-        <div className="status-bar">
+        <div className={`status-bar ${isGlobalPending ? "is-busy" : ""}`}>
           <span className={`status-dot ${isGlobalPending ? "busy" : ""}`} />
           <span>
             {!isGlobalPending
@@ -172,7 +198,7 @@ function AppContent() {
           onRemoveAttachment={removeAttachment}
           onFilesSelected={handleFilesSelected}
           input={input}
-          onInputChange={(value) => setDraft(activeSessionId, value)}
+          onInputChange={handleInputChange}
           isPending={isGlobalPending}
           showStop={isActiveRunningSession}
           onStop={stopActiveSession}

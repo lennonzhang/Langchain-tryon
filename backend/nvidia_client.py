@@ -171,3 +171,16 @@ def stream_chat(
 
 def cancel_chat(request_id: str) -> dict:
     return CancelChatUseCase(_REGISTRY).execute(request_id)
+
+
+def cancel_active_streams_for_shutdown(timeout_seconds: float) -> dict:
+    active_before = _REGISTRY.active_stream_count()
+    cancelled = _REGISTRY.cancel_active_streams()
+    drained = _REGISTRY.wait_for_no_active_streams(timeout_seconds)
+    active_after = _REGISTRY.active_stream_count()
+    return {
+        "active_streams_before": active_before,
+        "cancelled_streams": cancelled,
+        "drained": drained,
+        "active_streams_after": active_after,
+    }

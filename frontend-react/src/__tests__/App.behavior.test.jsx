@@ -22,8 +22,12 @@ const CAPABILITIES_RESPONSE = {
   models: [
     { id: "moonshotai/kimi-k2.5", label: "Kimi K2.5", capabilities: { thinking: true, media: true, agent: false }, context_window: 131072 },
     { id: "qwen/qwen3.5-397b-a17b", label: "Qwen 3.5", capabilities: { thinking: true, media: false, agent: true }, context_window: 128000 },
+    { id: "qwen/qwen3.5-122b-a10b", label: "Qwen 3.5 122B", capabilities: { thinking: true, media: false, agent: true }, context_window: 262144 },
   ],
 };
+
+let mediaQueryEnv;
+let resizeObserverEnv;
 
 function mockPendingAbortableStream({ emitDoneOnAbort = false } = {}) {
   let handlersRef = null;
@@ -98,10 +102,94 @@ function attachScrollMetrics(element, { scrollHeight = 0, clientHeight = 0, scro
   };
 }
 
+function installMatchMedia(initialMatches = false) {
+  let matches = initialMatches;
+  const listeners = new Set();
+  const media = "(max-width: 600px)";
+  const mediaQueryList = {
+    media,
+    get matches() {
+      return matches;
+    },
+    onchange: null,
+    addListener: vi.fn((listener) => listeners.add(listener)),
+    removeListener: vi.fn((listener) => listeners.delete(listener)),
+    addEventListener: vi.fn((event, listener) => {
+      if (event === "change") listeners.add(listener);
+    }),
+    removeEventListener: vi.fn((event, listener) => {
+      if (event === "change") listeners.delete(listener);
+    }),
+    dispatchEvent: vi.fn(),
+  };
+
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation(() => mediaQueryList),
+  });
+
+  return {
+    setMatches(nextMatches) {
+      matches = nextMatches;
+      const event = { matches, media };
+      mediaQueryList.onchange?.(event);
+      listeners.forEach((listener) => listener(event));
+    },
+  };
+}
+
+function installResizeObserver() {
+  class MockResizeObserver {
+    static instances = [];
+
+    constructor(callback) {
+      this.callback = callback;
+      this.observe = vi.fn();
+      this.unobserve = vi.fn();
+      this.disconnect = vi.fn();
+      MockResizeObserver.instances.push(this);
+    }
+  }
+
+  global.ResizeObserver = MockResizeObserver;
+
+  return {
+    trigger(targets) {
+      const entries = targets.map((target) => ({
+        target,
+        contentRect: target.getBoundingClientRect?.() || { width: target.offsetWidth || 0 },
+      }));
+
+      MockResizeObserver.instances.forEach((instance) => instance.callback(entries, instance));
+    },
+  };
+}
+
+function setElementWidth(element, width) {
+  Object.defineProperty(element, "offsetWidth", {
+    configurable: true,
+    get: () => width,
+  });
+
+  element.getBoundingClientRect = () => ({
+    width,
+    height: 0,
+    top: 0,
+    left: 0,
+    right: width,
+    bottom: 0,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+}
+
 describe("App behavior (session v2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useChatUiStore.getState().reset();
+    mediaQueryEnv = installMatchMedia(false);
+    resizeObserverEnv = installResizeObserver();
     fetchCapabilities.mockResolvedValue(CAPABILITIES_RESPONSE);
     cancelChat.mockResolvedValue({ cancelled: true });
     streamChat.mockImplementation(async (_payload, handlers) => {
@@ -123,6 +211,7 @@ describe("App behavior (session v2)", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    delete global.ResizeObserver;
   });
 
   async function findComposerInput() {
@@ -148,10 +237,18 @@ describe("App behavior (session v2)", () => {
     expect(list.textContent).toContain("final answer");
   });
 
-  it("opens sessions sidebar from chat header button", async () => {
+  it("opens sessions sidebar from chat header button in narrow overlay mode", async () => {
     render(<App />);
 
+    const appShell = document.querySelector(".app-shell");
     const sidebar = document.getElementById("session-sidebar");
+    setElementWidth(appShell, 840);
+    setElementWidth(sidebar, 320);
+    act(() => {
+      resizeObserverEnv.trigger([appShell, sidebar]);
+    });
+
+    await waitFor(() => expect(appShell).toHaveClass("is-session-overlay"));
     expect(sidebar?.classList.contains("is-open")).toBe(false);
 
     const trigger = screen.getByRole("button", { name: "Open sessions panel" });
@@ -164,6 +261,87 @@ describe("App behavior (session v2)", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("exits narrow overlay mode after the shell widens again", async () => {
+    render(<App />);
+
+    const appShell = document.querySelector(".app-shell");
+    const sidebar = document.getElementById("session-sidebar");
+    setElementWidth(appShell, 840);
+    setElementWidth(sidebar, 320);
+    act(() => {
+      resizeObserverEnv.trigger([appShell, sidebar]);
+    });
+
+    await waitFor(() => expect(appShell).toHaveClass("is-session-overlay"));
+    await userEvent.click(screen.getByRole("button", { name: "Open sessions panel" }));
+    expect(sidebar).toHaveClass("is-open");
+
+    setElementWidth(appShell, 980);
+    act(() => {
+      resizeObserverEnv.trigger([appShell, sidebar]);
+    });
+
+    await waitFor(() => expect(appShell).not.toHaveClass("is-session-overlay"));
+    await waitFor(() => expect(sidebar).not.toHaveClass("is-open"));
+  });
+
+  it("keeps overlay mode stable across repeated resize notifications at the same narrow width", async () => {
+    render(<App />);
+
+    const appShell = document.querySelector(".app-shell");
+    const sidebar = document.getElementById("session-sidebar");
+    setElementWidth(appShell, 840);
+    setElementWidth(sidebar, 320);
+
+    act(() => {
+      resizeObserverEnv.trigger([appShell, sidebar]);
+      resizeObserverEnv.trigger([appShell, sidebar]);
+      resizeObserverEnv.trigger([appShell, sidebar]);
+    });
+
+    await waitFor(() => expect(appShell).toHaveClass("is-session-overlay"));
+  });
+
+  it("enters overlay mode at the exact width threshold", async () => {
+    render(<App />);
+
+    const appShell = document.querySelector(".app-shell");
+    const sidebar = document.getElementById("session-sidebar");
+    setElementWidth(appShell, 864);
+    setElementWidth(sidebar, 320);
+
+    act(() => {
+      resizeObserverEnv.trigger([appShell, sidebar]);
+    });
+
+    await waitFor(() => expect(appShell).toHaveClass("is-session-overlay"));
+  });
+
+  it("uses the same overlay sidebar mode on true mobile viewports", async () => {
+    mediaQueryEnv.setMatches(true);
+    render(<App />);
+
+    const appShell = document.querySelector(".app-shell");
+    const sidebar = document.getElementById("session-sidebar");
+
+    await waitFor(() => expect(appShell).toHaveClass("is-session-overlay"));
+    await userEvent.click(screen.getByRole("button", { name: "Open sessions panel" }));
+
+    expect(sidebar).toHaveClass("is-open");
+    expect(screen.getByRole("button", { name: "Open sessions panel" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("fallback capabilities include qwen 122b and keep attachments hidden for it", async () => {
+    fetchCapabilities.mockRejectedValueOnce(new Error("capabilities down"));
+
+    render(<App />);
+
+    await userEvent.click(screen.getByRole("button", { name: /kimi-k2\.5/i }));
+    await userEvent.click(screen.getByText("qwen3.5-122b-a10b"));
+
+    expect(screen.queryByTestId("attach-strip")).toBeNull();
+  });
+
   it("new chat hides old messages, preserves unsent draft across switching, then clears it after first send", async () => {
     render(<App />);
 
@@ -173,7 +351,7 @@ describe("App behavior (session v2)", () => {
     const messageList = screen.getByTestId("messages-list");
     expect(await within(messageList).findByText("final answer")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByText("+ New Chat"));
+    await userEvent.click(screen.getByLabelText("New chat"));
     await waitFor(() => {
       expect(within(messageList).queryByText("final answer")).toBeNull();
       expect(within(messageList).getByText("Connected. Type your question to start.")).toBeInTheDocument();
@@ -188,15 +366,37 @@ describe("App behavior (session v2)", () => {
     await userEvent.click(previousSessionButton);
     expect(await within(messageList).findByText("final answer")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByText("+ New Chat"));
+    await userEvent.click(screen.getByLabelText("New chat"));
     expect((await findComposerInput()).value).toContain("draft keeps me");
 
     fireEvent.submit(document.querySelector("form.composer"));
     await within(messageList).findByText("final answer");
     expect(streamChat).toHaveBeenCalledTimes(2);
 
-    await userEvent.click(screen.getByText("+ New Chat"));
+    await userEvent.click(screen.getByLabelText("New chat"));
     expect((await findComposerInput()).value).toBe("");
+  });
+
+  it("preserves new chat draft when switching away immediately and typing in another session", async () => {
+    render(<App />);
+
+    await userEvent.type(await findComposerInput(), "origin session message");
+    fireEvent.submit(document.querySelector("form.composer"));
+    await screen.findByText("final answer");
+
+    await userEvent.click(screen.getByLabelText("New chat"));
+    await userEvent.type(await findComposerInput(), "draft A");
+
+    const sessionList = screen.getByTestId("session-list");
+    const previousSessionTitle = within(sessionList).getByText("origin session message");
+    const previousSessionButton = previousSessionTitle.closest(".session-item");
+    expect(previousSessionButton).toBeTruthy();
+
+    await userEvent.click(previousSessionButton);
+    await userEvent.type(await findComposerInput(), " more in old session");
+
+    await userEvent.click(screen.getByLabelText("New chat"));
+    expect((await findComposerInput()).value).toBe("draft A");
   });
 
   it("keeps error UI when stream emits error then done", async () => {
@@ -371,7 +571,7 @@ describe("App behavior (session v2)", () => {
       expect(screen.getByText("Generating response...")).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByText("+ New Chat"));
+    await userEvent.click(screen.getByLabelText("New chat"));
     const nextInput = await findComposerInput();
     const sendBtn = screen.getByRole("button", { name: "Send" });
 
@@ -382,7 +582,7 @@ describe("App behavior (session v2)", () => {
     expect(streamChat).toHaveBeenCalledTimes(1);
 
     const sessionList = screen.getByTestId("session-list");
-    const runningSessionButton = sessionList.querySelector(".session-item");
+    const runningSessionButton = sessionList.querySelector(".session-row:not(.session-row-entry) .session-item");
     expect(runningSessionButton).toBeTruthy();
     await userEvent.click(runningSessionButton);
     await waitFor(() => {
@@ -420,7 +620,7 @@ describe("App behavior (session v2)", () => {
     });
     expect(screen.queryByText("Canceled by user.")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByText("+ New Chat"));
+    await userEvent.click(screen.getByLabelText("New chat"));
     const nextInput = await findComposerInput();
     expect(nextInput).not.toBeDisabled();
     await userEvent.type(nextInput, "second session question");

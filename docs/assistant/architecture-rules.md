@@ -23,6 +23,10 @@
   - frontend stop first hits `/api/chat/cancel`
   - backend cancellation is best-effort but must stop local streaming immediately
   - user stop terminates as `done(stop)`, not `error`
+- Local `python server.py` shutdown is stream-aware:
+  - first `Ctrl+C` gates new `/api/chat` and `/api/chat/stream` requests
+  - only active streaming requests are batch-cancelled for shutdown drain
+  - local shutdown waits briefly for stream registry drain before exit
 
 ## Frontend Stream and Session Rules
 
@@ -47,7 +51,7 @@
 - Unsent draft content under `NEW_SESSION_KEY` is preserved when switching to existing sessions.
 - First successful send from `NEW_SESSION_KEY` must clear draft text for that key after the new session is created.
 - Session sidebar uses responsive fixed width on desktop/tablet; avoid content-driven width growth.
-- Mobile (`<=600px`) uses a left overlay drawer for sessions opened from chat header trigger.
+- Mobile (`<=600px`) and narrow layouts where the whole panel width is less than or equal to `sessionSidebarWidth * 2.7` use a left overlay drawer for sessions opened from the chat header trigger.
 - `RichBlock` debounces MathJax typesetting by `500ms`.
 - `RichBlock` skips Prism highlighting while `streaming=true` and highlights code blocks once after stream completion (`streaming=false`).
 - `MessageList` message items (`UserMessage`, `AssistantMessage`) remain `memo()`-wrapped.

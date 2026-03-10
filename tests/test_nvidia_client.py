@@ -136,6 +136,20 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertEqual(kwargs["temperature"], 0.6)
         self.assertEqual(kwargs["top_p"], 0.95)
 
+    def test_build_chat_model_qwen_122b_defaults(self):
+        fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
+        chat_cls = unittest.mock.Mock()
+        fake_module.ChatNVIDIA = chat_cls
+        with (
+            patch.dict(sys.modules, {"langchain_nvidia_ai_endpoints": fake_module}),
+            patch.dict(os.environ, {"NVIDIA_API_KEY": "nv-key"}, clear=False),
+        ):
+            _build_chat_model("api-key", "qwen/qwen3.5-122b-a10b", thinking_mode=True)
+
+        kwargs = chat_cls.call_args.kwargs
+        self.assertEqual(kwargs["temperature"], 0.6)
+        self.assertEqual(kwargs["top_p"], 0.95)
+
     def test_build_messages_includes_search_context_first(self):
         messages = _build_messages(
             "moonshotai/kimi-k2.5",
@@ -190,6 +204,18 @@ class TestNvidiaClient(unittest.TestCase):
         self.assertEqual(user_content[0]["type"], "text")
         self.assertEqual(user_content[1]["type"], "image_url")
         self.assertEqual(user_content[2]["type"], "video_url")
+
+    def test_build_messages_qwen_122b_ignores_media(self):
+        messages = _build_messages(
+            "qwen/qwen3.5-122b-a10b",
+            "describe media",
+            [],
+            images=[
+                "data:image/png;base64,abcd",
+                "data:video/mp4;base64,efgh",
+            ],
+        )
+        self.assertEqual(messages[-1]["content"], "describe media")
 
     def test_build_messages_zai_ignores_images(self):
         messages = _build_messages(
@@ -330,6 +356,7 @@ class TestNvidiaClient(unittest.TestCase):
                     enable_search=True,
                     thinking_mode=True,
                     images=["data:image/png;base64,abcd"],
+                    request_id="rid-stream-search-content",
                 )
             )
 
@@ -375,6 +402,7 @@ class TestNvidiaClient(unittest.TestCase):
                     enable_search=False,
                     agent_mode=False,
                     thinking_mode=False,
+                    request_id="rid-stream-zai-no-thinking",
                 )
             )
 
@@ -412,6 +440,7 @@ class TestNvidiaClient(unittest.TestCase):
                     enable_search=False,
                     agent_mode=False,
                     thinking_mode=True,
+                    request_id="rid-stream-qwen-thinking",
                 )
             )
 
@@ -440,6 +469,7 @@ class TestNvidiaClient(unittest.TestCase):
                     "question",
                     [],
                     enable_search=True,
+                    request_id="rid-stream-search-error",
                 )
             )
 
@@ -530,6 +560,7 @@ class TestNvidiaClient(unittest.TestCase):
 
     def test_should_use_agentic_flow_defaults_and_overrides(self):
         self.assertTrue(_should_use_agentic_flow("qwen/qwen3.5-397b-a17b", None))
+        self.assertTrue(_should_use_agentic_flow("qwen/qwen3.5-122b-a10b", None))
         self.assertTrue(_should_use_agentic_flow("z-ai/glm5", None))
         self.assertFalse(_should_use_agentic_flow("moonshotai/kimi-k2.5", None))
         self.assertTrue(_should_use_agentic_flow("anthropic/claude-sonnet-4-6", None))
@@ -563,6 +594,7 @@ class TestNvidiaClient(unittest.TestCase):
                     [],
                     enable_search=False,
                     thinking_mode=True,
+                    request_id="rid-stream-qwen-agent-auto",
                 )
             )
 
@@ -594,6 +626,7 @@ class TestNvidiaClient(unittest.TestCase):
                     enable_search=False,
                     agent_mode=True,
                     thinking_mode=True,
+                    request_id="rid-stream-zai-agent",
                 )
             )
 
@@ -634,6 +667,7 @@ class TestNvidiaClient(unittest.TestCase):
                 enable_search=False,
                 agent_mode=True,
                 thinking_mode=True,
+                request_id="rid-stream-agent-early-events",
             )
             first = next(events)
             start = time.monotonic()
