@@ -39,7 +39,8 @@ test.describe("chat stream e2e", () => {
     await page.goto("/");
     const messagesList = page.getByTestId("messages-list");
 
-    await page.locator("#searchToggle").check({ force: true });
+    await page.locator(".model-trigger").click();
+    await page.getByLabel("Web Search").check({ force: true });
     await sendMessage(page, "find docs");
 
     await expect(page.getByTestId("search-panel")).toBeVisible();

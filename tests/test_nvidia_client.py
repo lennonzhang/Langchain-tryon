@@ -356,6 +356,7 @@ class TestNvidiaClient(unittest.TestCase):
                     enable_search=True,
                     thinking_mode=True,
                     images=["data:image/png;base64,abcd"],
+                    request_id="rid-stream-search-content",
                 )
             )
 
@@ -401,6 +402,7 @@ class TestNvidiaClient(unittest.TestCase):
                     enable_search=False,
                     agent_mode=False,
                     thinking_mode=False,
+                    request_id="rid-stream-zai-no-thinking",
                 )
             )
 
@@ -438,6 +440,7 @@ class TestNvidiaClient(unittest.TestCase):
                     enable_search=False,
                     agent_mode=False,
                     thinking_mode=True,
+                    request_id="rid-stream-qwen-thinking",
                 )
             )
 
@@ -466,6 +469,7 @@ class TestNvidiaClient(unittest.TestCase):
                     "question",
                     [],
                     enable_search=True,
+                    request_id="rid-stream-search-error",
                 )
             )
 
@@ -590,6 +594,7 @@ class TestNvidiaClient(unittest.TestCase):
                     [],
                     enable_search=False,
                     thinking_mode=True,
+                    request_id="rid-stream-qwen-agent-auto",
                 )
             )
 
@@ -621,6 +626,7 @@ class TestNvidiaClient(unittest.TestCase):
                     enable_search=False,
                     agent_mode=True,
                     thinking_mode=True,
+                    request_id="rid-stream-zai-agent",
                 )
             )
 
@@ -661,6 +667,7 @@ class TestNvidiaClient(unittest.TestCase):
                 enable_search=False,
                 agent_mode=True,
                 thinking_mode=True,
+                request_id="rid-stream-agent-early-events",
             )
             first = next(events)
             start = time.monotonic()

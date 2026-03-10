@@ -2,6 +2,110 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-10 (Stream Init Error Handling + Active Request ID Guard + Empty Model Selector)
+
+### Summary
+
+Hardened stream startup failure handling, rejected duplicate active top-level `request_id` reuse, and made the frontend model selector degrade safely when capabilities expose no selectable models.
+
+### Backend
+
+- Updated `backend/application/chat_use_cases.py`:
+  - moved stream client construction inside the worker `try` block so setup failures still emit `error` then `done(error)`
+  - ensure setup-time failures still clean up the execution registry and close the sink
+- Updated `backend/domain/execution.py`:
+  - added `DuplicateRequestIdError`
+  - reject duplicate active top-level `request_id` registration instead of overwriting the previous execution
+- Updated `backend/gateway/app.py`:
+  - `POST /api/chat` now returns `409` with `error: "request_id already active"` for duplicate active request ids
+  - `POST /api/chat/stream` preserves the SSE contract and emits `error` then `done(error)` for the same condition
+
+### Frontend
+
+- Updated `frontend-react/src/components/ModelSelect.jsx`:
+  - disable the trigger and show `No models available` when capabilities return an empty model list
+  - guard keyboard handlers and menu opening so empty model lists cannot enter an invalid focus/index state
+
+### Tests
+
+- Updated `tests/test_execution.py` with duplicate active `request_id` rejection and post-finish reuse coverage
+- Updated `tests/test_chat_use_cases.py` with stream init failure cleanup coverage
+- Updated `tests/test_gateway_app.py` with duplicate active `request_id` behavior for both chat and stream routes
+- Updated `frontend-react/src/__tests__/ModelSelect.test.jsx` with empty-model-list coverage
+
+### Docs
+
+- Updated `docs/assistant/api-and-sse-contract.md`
+- Updated `docs/assistant/validation-and-release-checklist.md`
+- Updated `README.md`
+
+## 2026-03-10 (OpenAI Responses Timeout + Multi-item Hardening)
+
+### Summary
+
+Hardened the OpenAI Responses protocol path so transport timeouts now preserve the backend timeout flow, and lifecycle fallback is more robust when the proxy emits multiple `response.output_item.added` snapshots for the same item.
+
+### Backend
+
+- Updated `backend/infrastructure/protocols/openai_responses.py`:
+  - switched OpenAI `/responses` streaming transport to `httpx` with a dedicated SSE read-idle timeout
+  - preserve OpenAI read/connect timeout failures as `TimeoutError` instead of normalizing them into generic upstream runtime errors
+  - merge repeated `response.output_item.added` / `response.output_item.done` snapshots by item identity
+  - keep fallback ordering stable by `output_index` or first-seen order when `output_index` is absent
+  - replay snapshot-based stream fallback incrementally so repeated item snapshots do not duplicate already-emitted text
+- Updated `backend/infrastructure/provider_settings.py`:
+  - added `OPENAI_SSE_READ_TIMEOUT_SECONDS` resolution with default `600`
+
+### Tests
+
+- Updated `tests/test_proxy_chat_model.py` with coverage for repeated `output_item.added` merges, `added -> done` tool-call recovery, first-seen ordering without `output_index`, incremental snapshot replay, and OpenAI timeout propagation as `TimeoutError`
+- Updated `tests/test_provider_settings.py` for `OPENAI_SSE_READ_TIMEOUT_SECONDS`
+
+### Docs
+
+- Updated `docs/assistant/runtime-and-commands.md`
+- Updated `docs/assistant/model-and-provider-policy.md`
+- Updated `README.md`
+- Updated `.env.example`
+
+## 2026-03-10 (Local Ctrl+C Graceful Stream Shutdown)
+
+### Summary
+
+Changed the local `python server.py` shutdown path so the first `Ctrl+C` now drains active streaming requests instead of exiting immediately.
+
+### Backend
+
+- Updated `backend/domain/execution.py`:
+  - track active executions by kind (`stream` vs `once`)
+  - added stream-only batch cancellation and bounded drain waiting helpers
+  - kept duplicate `request_id` finish semantics precise by matching the current token
+- Updated `backend/application/chat_use_cases.py` to register `chat_once` as `once` and `stream_chat` as `stream`
+- Updated `backend/nvidia_client.py` with `cancel_active_streams_for_shutdown(timeout_seconds)` as the shutdown-facing facade helper
+- Updated `backend/gateway/app.py`:
+  - added a local shutdown gate for `/api/chat` and `/api/chat/stream`
+  - kept `/api/chat/cancel` available during shutdown drain
+- Updated `backend/server.py`:
+  - replaced the direct `uvicorn.run(...)` call with a local graceful-shutdown wrapper
+  - first `Ctrl+C` now flips shutdown mode, cancels active streams, waits up to `SHUTDOWN_CANCEL_DRAIN_SECONDS`, then exits
+  - second `Ctrl+C` still force-exits immediately
+
+### Tests
+
+- Updated `tests/test_execution.py`
+- Updated `tests/test_gateway_app.py`
+- Added `tests/test_server.py`
+
+### Docs
+
+- Updated `docs/assistant/api-and-sse-contract.md`
+- Updated `docs/assistant/architecture-rules.md`
+- Updated `docs/assistant/runtime-and-commands.md`
+- Updated `README.md`
+- Updated `.env.example`
+
+---
+
 ## 2026-03-09 (Responsive Session Drawer On Narrow Desktop)
 
 ### Summary
@@ -28,6 +132,54 @@ Extended the frontend session sidebar responsiveness so narrow desktop widths no
 - Updated `docs/assistant/architecture-rules.md`
 - Updated `docs/assistant/validation-and-release-checklist.md`
 - Updated `README.md`
+
+---
+
+## 2026-03-10 (OpenAI Responses Lifecycle Compatibility)
+
+### Summary
+
+Hardened OpenAI Responses handling so both invoke and stream paths can reconstruct results from the lifecycle `response.created -> response.output_item.added/done -> response.completed`, while still preferring `response.completed` when present.
+
+### Backend
+
+- Updated `backend/infrastructure/protocols/openai_responses.py`:
+  - added a small lifecycle accumulator for `response.created`, `response.output_item.added`, `response.output_item.done`, and optional `response.completed`
+  - prefer `response.completed.response` over output-item snapshots, and prefer `output_item.done` over `output_item.added`
+  - finalize from EOF item snapshots only when no `response.completed` is received and recoverable output items exist
+  - keep stream text de-duplicated when both deltas and final output snapshots are present
+
+### Tests
+
+- Updated `tests/test_proxy_chat_model.py` with coverage for lifecycle ordering, EOF fallback, tool-call reconstruction, and stream no-duplication
+
+### Docs
+
+- Updated `docs/assistant/model-and-provider-policy.md`
+
+---
+
+## 2026-03-10 (Claude Messages Lifecycle Tool-Use Compatibility)
+
+### Summary
+
+Hardened Anthropic Messages handling so Claude lifecycle streams can recover text and tool-use state across `message_start`, `content_block_*`, `message_delta`, and `message_stop` without changing the frontend SSE contract.
+
+### Backend
+
+- Updated `backend/infrastructure/protocols/anthropic_messages.py`:
+  - added a Claude lifecycle accumulator for message/content-block events
+  - parse invoke content blocks through the same block parser used by lifecycle recovery
+  - keep `stream()` outward semantics unchanged while allowing EOF text recovery from completed lifecycle state
+  - reconstruct `tool_use` only when accumulated `input_json_delta` is complete and parseable
+
+### Tests
+
+- Updated `tests/test_proxy_chat_model.py` with coverage for Anthropic reasoning/tool-use parsing, EOF text recovery, and incomplete tool JSON behavior
+
+### Docs
+
+- Updated `docs/assistant/model-and-provider-policy.md`
 
 ---
 

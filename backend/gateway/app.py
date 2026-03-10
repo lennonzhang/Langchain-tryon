@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
 from backend.config import load_api_key
+from backend.domain.execution import DuplicateRequestIdError
 from backend.model_registry import capabilities_response
 from backend.nvidia_client import cancel_chat, chat_once, stream_chat
 from backend.schemas import ChatRequest, ValidationError
@@ -21,8 +22,10 @@ app = FastAPI()
 _API_KEY = load_api_key(BASE_DIR)
 _ADMISSION_GATE = AdmissionGate.from_env()
 app.state.debug_stream = False
+app.state.shutdown_requested = False
 _MAX_JSON_BODY = 10 * 1024 * 1024
 _MAX_REQUEST_ID_CHARS = ChatRequest._MAX_REQUEST_ID_CHARS
+_SHUTDOWN_MESSAGE = "Server shutting down"
 
 
 class GatewayRequestError(Exception):
@@ -134,6 +137,8 @@ def _safe_frontend_target(rel_path: str) -> tuple[Path | None, int | None]:
 
 @app.post("/api/chat")
 async def post_chat(request: Request):
+    if bool(getattr(app.state, "shutdown_requested", False)):
+        return _json_error(503, _SHUTDOWN_MESSAGE)
     try:
         req = await _parse_chat_request(request)
     except PayloadTooLargeError:
@@ -162,6 +167,8 @@ async def post_chat(request: Request):
             )
     except (QueueFullError, QueueTimeoutError) as exc:
         return JSONResponse(status_code=503, content={"error": str(exc)})
+    except DuplicateRequestIdError as exc:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
     except TimeoutError as exc:
         return JSONResponse(status_code=504, content={"error": "Upstream request timeout", "detail": str(exc)[:500]})
     except Exception as exc:  # noqa: BLE001
@@ -171,6 +178,8 @@ async def post_chat(request: Request):
 
 @app.post("/api/chat/stream")
 async def post_chat_stream(request: Request):
+    if bool(getattr(app.state, "shutdown_requested", False)):
+        return _json_error(503, _SHUTDOWN_MESSAGE)
     try:
         req = await _parse_chat_request(request)
     except PayloadTooLargeError:
@@ -212,6 +221,9 @@ async def post_chat_stream(request: Request):
                 yield _enrich_event(event, request_id=req.request_id)
         except TimeoutError as exc:
             yield _enrich_event({"type": "error", "error": f"Upstream request timeout: {str(exc)[:500]}"}, req.request_id)
+            yield _enrich_event({"type": "done", "finish_reason": "error"}, req.request_id)
+        except DuplicateRequestIdError as exc:
+            yield _enrich_event({"type": "error", "error": str(exc)}, req.request_id)
             yield _enrich_event({"type": "done", "finish_reason": "error"}, req.request_id)
         except Exception as exc:  # noqa: BLE001
             yield _enrich_event({"type": "error", "error": str(exc)}, req.request_id)

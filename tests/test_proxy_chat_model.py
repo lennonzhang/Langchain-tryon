@@ -1,10 +1,13 @@
 import json
 import io
+import httpx
 from urllib import error as urlerror
 import unittest
 from unittest.mock import patch
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+
+import backend.infrastructure.protocols.anthropic_messages as _anthropic_messages
 
 from backend.proxy_chat_model import (
     ProxyGatewayChatModel,
@@ -40,6 +43,30 @@ def _openai_sse_lines(completed_response: dict) -> list[bytes]:
     return [f'data: {json.dumps(event)}\n'.encode("utf-8")]
 
 
+class _FakeOpenAISseContext:
+    def __init__(self, lines: list[bytes]):
+        self._lines = lines
+
+    def __enter__(self):
+        return iter(self._lines)
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def _fake_openai_sse(lines: list[bytes], captured: dict | None = None, exc: Exception | None = None):
+    def _factory(config, body, headers):
+        if captured is not None:
+            captured["body"] = body
+            captured["headers"] = headers
+            captured["url"] = f"{config.base_url.rstrip('/')}/responses"
+        if exc is not None:
+            raise exc
+        return _FakeOpenAISseContext(lines)
+
+    return _factory
+
+
 class TestProxyChatModel(unittest.TestCase):
     def test_anthropic_messages_response_parsed(self):
         payload = {
@@ -47,7 +74,11 @@ class TestProxyChatModel(unittest.TestCase):
             "type": "message",
             "role": "assistant",
             "model": "claude-sonnet-4-6",
-            "content": [{"type": "text", "text": "hello"}],
+            "content": [
+                {"type": "thinking", "thinking": "plan"},
+                {"type": "text", "text": "hello"},
+                {"type": "tool_use", "id": "tool_1", "name": "web_search", "input": {"query": "q"}},
+            ],
             "usage": {"input_tokens": 10, "output_tokens": 4},
         }
         model = ProxyGatewayChatModel(
@@ -62,6 +93,9 @@ class TestProxyChatModel(unittest.TestCase):
         ):
             out = model.invoke([HumanMessage(content="hi")])
         self.assertEqual(out.content, "hello")
+        self.assertEqual(out.additional_kwargs.get("reasoning_content"), "plan")
+        self.assertEqual(out.tool_calls[0]["name"], "web_search")
+        self.assertEqual(out.tool_calls[0]["args"], {"query": "q"})
 
     def test_openai_responses_parsed_reasoning_and_text(self):
         completed = {
@@ -88,8 +122,8 @@ class TestProxyChatModel(unittest.TestCase):
             thinking_mode=True,
         )
         with patch(
-            "backend.proxy_chat_model.request.urlopen",
-            return_value=_FakeHttpResponse(b"", lines=_openai_sse_lines(completed)),
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(_openai_sse_lines(completed)),
         ):
             out = model.invoke([HumanMessage(content="hi")])
         self.assertEqual(out.content, "answer")
@@ -191,8 +225,8 @@ class TestProxyChatModel(unittest.TestCase):
             base_url="https://x/api/v1",
         )
         with patch(
-            "backend.proxy_chat_model.request.urlopen",
-            return_value=_FakeHttpResponse(b"", lines=lines),
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
         ):
             chunks = list(model.stream([HumanMessage(content="hi")]))
         self.assertTrue(any(c.additional_kwargs.get("reasoning_content") == "r1" for c in chunks))
@@ -221,8 +255,8 @@ class TestProxyChatModel(unittest.TestCase):
             base_url="https://x/api/v1",
         )
         with patch(
-            "backend.proxy_chat_model.request.urlopen",
-            return_value=_FakeHttpResponse(b"", lines=lines),
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
         ):
             chunks = list(model.stream([HumanMessage(content="hi")]))
         text = "".join(c.content for c in chunks)
@@ -245,10 +279,6 @@ class TestProxyChatModel(unittest.TestCase):
 
         captured = {}
 
-        def _fake_urlopen(req, timeout=0):  # noqa: ARG001
-            captured["body"] = json.loads(req.data.decode("utf-8"))
-            return _FakeHttpResponse(b"", lines=_openai_sse_lines(completed))
-
         def web_search(query: str) -> str:
             return query
 
@@ -259,7 +289,10 @@ class TestProxyChatModel(unittest.TestCase):
             base_url="https://x/api/v1",
         ).bind_tools([web_search])
 
-        with patch("backend.proxy_chat_model.request.urlopen", side_effect=_fake_urlopen):
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(_openai_sse_lines(completed), captured),
+        ):
             out = model.invoke([HumanMessage(content="hi")])
 
         tools = captured["body"]["tools"]
@@ -282,8 +315,8 @@ class TestProxyChatModel(unittest.TestCase):
             base_url="https://x/api/v1",
         )
         with patch(
-            "backend.proxy_chat_model.request.urlopen",
-            return_value=_FakeHttpResponse(b"", lines=lines),
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
         ):
             out = model.invoke([HumanMessage(content="hi")])
         self.assertEqual(out.content, "ok")
@@ -301,8 +334,8 @@ class TestProxyChatModel(unittest.TestCase):
         )
         with (
             patch(
-                "backend.proxy_chat_model.request.urlopen",
-                return_value=_FakeHttpResponse(b"", lines=lines),
+                "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+                side_effect=_fake_openai_sse(lines),
             ),
             self.assertRaises(RuntimeError) as ctx,
         ):
@@ -312,6 +345,185 @@ class TestProxyChatModel(unittest.TestCase):
         self.assertIn("provider=openai", msg)
         self.assertIn("protocol=openai_responses", msg)
         self.assertIn("missing response.completed", msg)
+
+    def test_openai_invoke_recovers_from_output_item_when_completed_missing(self):
+        lines = [
+            (
+                b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n'
+            ),
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.added","output_index":0,'
+                b'"item":{"type":"message","role":"assistant","content":['
+                b'{"type":"output_text","text":"recovered answer"}'
+                b']}}\n'
+            ),
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            out = model.invoke([HumanMessage(content="hi")])
+
+        self.assertEqual(out.content, "recovered answer")
+
+    def test_openai_invoke_prefers_completed_over_output_item_snapshots(self):
+        completed = {
+            "model": "gpt-5.3-codex",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "final answer"}],
+                }
+            ],
+            "usage": {"input_tokens": 2, "output_tokens": 3},
+        }
+        lines = [
+            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n',
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.done","output_index":0,'
+                b'"item":{"type":"message","role":"assistant","content":['
+                b'{"type":"output_text","text":"stale answer"}'
+                b']}}\n'
+            ),
+            b'\n',
+            f'data: {json.dumps({"type": "response.completed", "response": completed})}\n'.encode("utf-8"),
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            out = model.invoke([HumanMessage(content="hi")])
+
+        self.assertEqual(out.content, "final answer")
+
+    def test_openai_invoke_orders_output_items_by_output_index(self):
+        lines = [
+            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n',
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.done","output_index":1,'
+                b'"item":{"type":"message","role":"assistant","content":['
+                b'{"type":"output_text","text":"second"}'
+                b']}}\n'
+            ),
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.done","output_index":0,'
+                b'"item":{"type":"message","role":"assistant","content":['
+                b'{"type":"output_text","text":"first "}'
+                b']}}\n'
+            ),
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            out = model.invoke([HumanMessage(content="hi")])
+
+        self.assertEqual(out.content, "first second")
+
+    def test_openai_invoke_recovers_tool_call_from_output_item_done(self):
+        lines = [
+            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n',
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.done","output_index":0,'
+                b'"item":{"type":"function_call","call_id":"call_1","name":"web_search",'
+                b'"arguments":"{\\"query\\":\\"q\\"}"}}\n'
+            ),
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            out = model.invoke([HumanMessage(content="hi")])
+
+        self.assertEqual(out.tool_calls[0]["name"], "web_search")
+        self.assertEqual(out.tool_calls[0]["args"], {"query": "q"})
+
+    def test_openai_stream_recovers_text_from_output_items_when_completed_missing(self):
+        lines = [
+            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n',
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.done","output_index":0,'
+                b'"item":{"type":"message","role":"assistant","content":['
+                b'{"type":"output_text","text":"fallback answer"}'
+                b']}}\n'
+            ),
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            chunks = list(model.stream([HumanMessage(content="hi")]))
+
+        self.assertEqual("".join(c.content for c in chunks), "fallback answer")
+
+    def test_openai_stream_no_double_text_when_deltas_and_output_items_both_exist(self):
+        lines = [
+            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n',
+            b'\n',
+            b'data: {"type":"response.output_text.delta","delta":"full "}\n',
+            b'data: {"type":"response.output_text.delta","delta":"answer"}\n',
+            (
+                b'data: {"type":"response.output_item.done","output_index":0,'
+                b'"item":{"type":"message","role":"assistant","content":['
+                b'{"type":"output_text","text":"full answer"}'
+                b']}}\n'
+            ),
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            chunks = list(model.stream([HumanMessage(content="hi")]))
+
+        self.assertEqual("".join(c.content for c in chunks), "full answer")
 
     def test_openai_stream_event_error_is_normalized(self):
         lines = [
@@ -326,8 +538,8 @@ class TestProxyChatModel(unittest.TestCase):
         )
         with (
             patch(
-                "backend.proxy_chat_model.request.urlopen",
-                return_value=_FakeHttpResponse(b"", lines=lines),
+                "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+                side_effect=_fake_openai_sse(lines),
             ),
             self.assertRaises(RuntimeError) as ctx,
         ):
@@ -352,8 +564,8 @@ class TestProxyChatModel(unittest.TestCase):
         )
         with (
             patch(
-                "backend.proxy_chat_model.request.urlopen",
-                return_value=_FakeHttpResponse(b"", lines=lines),
+                "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+                side_effect=_fake_openai_sse(lines),
             ),
             self.assertRaises(RuntimeError) as ctx,
         ):
@@ -364,6 +576,169 @@ class TestProxyChatModel(unittest.TestCase):
         self.assertIn("protocol=openai_responses", msg)
         self.assertIn("type=request_error", msg)
         self.assertIn("invoke boom", msg)
+
+    def test_openai_invoke_merges_multiple_added_events_for_same_message_item(self):
+        lines = [
+            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n',
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.added","output_index":0,'
+                b'"item":{"type":"message","role":"assistant","content":['
+                b'{"type":"output_text","text":"hello "},'
+                b'{"type":"output_text","text":""}'
+                b']}}\n'
+            ),
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.added","output_index":0,'
+                b'"item":{"type":"message","content":['
+                b'{},'
+                b'{"type":"output_text","text":"world"}'
+                b']}}\n'
+            ),
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            out = model.invoke([HumanMessage(content="hi")])
+
+        self.assertEqual(out.content, "hello world")
+
+    def test_openai_invoke_done_merges_with_added_for_tool_call(self):
+        lines = [
+            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n',
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.added","output_index":0,'
+                b'"item":{"type":"function_call","call_id":"call_1","name":"web_search",'
+                b'"arguments":"{\\"query\\":\\"wea"}}\n'
+            ),
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.done","output_index":0,'
+                b'"item":{"type":"function_call","call_id":"call_1",'
+                b'"arguments":"{\\"query\\":\\"weather\\"}"}}\n'
+            ),
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            out = model.invoke([HumanMessage(content="hi")])
+
+        self.assertEqual(out.tool_calls[0]["name"], "web_search")
+        self.assertEqual(out.tool_calls[0]["args"], {"query": "weather"})
+
+    def test_openai_invoke_keeps_first_seen_order_without_output_index(self):
+        lines = [
+            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n',
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.done","item":{"id":"b_item","type":"message",'
+                b'"role":"assistant","content":[{"type":"output_text","text":"first "}]}}\n'
+            ),
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.done","item":{"id":"a_item","type":"message",'
+                b'"role":"assistant","content":[{"type":"output_text","text":"second"}]}}\n'
+            ),
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            out = model.invoke([HumanMessage(content="hi")])
+
+        self.assertEqual(out.content, "first second")
+
+    def test_openai_stream_replays_only_new_suffix_from_output_item_snapshots(self):
+        lines = [
+            b'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n',
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.added","output_index":0,'
+                b'"item":{"type":"message","role":"assistant","content":['
+                b'{"type":"output_text","text":"hello "},'
+                b'{"type":"output_text","text":""}'
+                b']}}\n'
+            ),
+            b'\n',
+            (
+                b'data: {"type":"response.output_item.added","output_index":0,'
+                b'"item":{"type":"message","content":['
+                b'{},'
+                b'{"type":"output_text","text":"world"}'
+                b']}}\n'
+            ),
+            b'\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines),
+        ):
+            chunks = list(model.stream([HumanMessage(content="hi")]))
+
+        self.assertEqual([chunk.content for chunk in chunks if chunk.content], ["hello ", "world"])
+
+    def test_openai_invoke_timeout_is_preserved_as_timeout_error(self):
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with (
+            patch(
+                "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+                side_effect=_fake_openai_sse([], exc=httpx.ReadTimeout("The read operation timed out")),
+            ),
+            self.assertRaises(TimeoutError),
+        ):
+            model.invoke([HumanMessage(content="hi")])
+
+    def test_openai_stream_timeout_is_preserved_as_timeout_error(self):
+        model = ProxyGatewayChatModel(
+            provider="openai",
+            model="gpt-5.3-codex",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with (
+            patch(
+                "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+                side_effect=_fake_openai_sse([], exc=httpx.ReadTimeout("The read operation timed out")),
+            ),
+            self.assertRaises(TimeoutError),
+        ):
+            list(model.stream([HumanMessage(content="hi")]))
 
     def test_json_post_empty_body_raises_diagnostic(self):
         with (
@@ -487,10 +862,6 @@ class TestProxyChatModel(unittest.TestCase):
         }
         captured = {}
 
-        def _fake_urlopen(req, timeout=0):  # noqa: ARG001
-            captured["body"] = json.loads(req.data.decode("utf-8"))
-            return _FakeHttpResponse(b"", lines=_openai_sse_lines(completed))
-
         model = ProxyGatewayChatModel(
             provider="openai",
             model="gpt-5.3-codex",
@@ -499,7 +870,10 @@ class TestProxyChatModel(unittest.TestCase):
             temperature=0.3,
             top_p=0.8,
         )
-        with patch("backend.proxy_chat_model.request.urlopen", side_effect=_fake_urlopen):
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(_openai_sse_lines(completed), captured),
+        ):
             model.invoke([HumanMessage(content="hi")])
 
         self.assertNotIn("temperature", captured["body"])
@@ -572,6 +946,182 @@ class TestProxyChatModel(unittest.TestCase):
             list(model.stream([HumanMessage(content="hi")]))
         self.assertTrue(captured["body"]["stream"])
 
+    def test_anthropic_stream_recovers_text_at_eof_without_message_stop(self):
+        lines = [
+            b'data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-6"}}\n',
+            b'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n',
+            b'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Recovered"}}\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.proxy_chat_model.request.urlopen",
+            return_value=_FakeHttpResponse(b"", lines=lines),
+        ):
+            chunks = list(model.stream([HumanMessage(content="hi")]))
+
+        self.assertEqual("".join(c.content for c in chunks), "Recovered")
+
+    def test_anthropic_stream_recovers_text_from_started_block_when_no_text_deltas_emitted(self):
+        lines = [
+            b'data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-6"}}\n',
+            b'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Final snapshot"}}\n',
+            b'data: {"type":"content_block_stop","index":0}\n',
+            b'data: {"type":"message_stop"}\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.proxy_chat_model.request.urlopen",
+            return_value=_FakeHttpResponse(b"", lines=lines),
+        ):
+            chunks = list(model.stream([HumanMessage(content="hi")]))
+
+        self.assertEqual("".join(c.content for c in chunks), "Final snapshot")
+
+    def test_anthropic_stream_orders_started_text_blocks_by_index(self):
+        lines = [
+            b'data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-6"}}\n',
+            b'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":"second"}}\n',
+            b'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"first "}}\n',
+            b'data: {"type":"message_stop"}\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.proxy_chat_model.request.urlopen",
+            return_value=_FakeHttpResponse(b"", lines=lines),
+        ):
+            chunks = list(model.stream([HumanMessage(content="hi")]))
+
+        self.assertEqual("".join(c.content for c in chunks), "first second")
+
+    def test_anthropic_stream_no_false_text_recovery_for_thinking_only_eof(self):
+        lines = [
+            b'data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-6"}}\n',
+            b'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n',
+            b'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"step1"}}\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.proxy_chat_model.request.urlopen",
+            return_value=_FakeHttpResponse(b"", lines=lines),
+        ):
+            try:
+                chunks = list(model.stream([HumanMessage(content="hi")]))
+            except ValueError:
+                chunks = []
+
+        self.assertEqual("".join(c.content for c in chunks), "")
+        self.assertTrue(any(c.additional_kwargs.get("reasoning_content") == "step1" for c in chunks))
+
+    def test_anthropic_stream_tool_use_partial_json_is_not_emitted_as_text(self):
+        lines = [
+            b'data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-6"}}\n',
+            b'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool_1","name":"web_search"}}\n',
+            b'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":\\"hel"}}\n',
+        ]
+        model = ProxyGatewayChatModel(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.proxy_chat_model.request.urlopen",
+            return_value=_FakeHttpResponse(b"", lines=lines),
+        ):
+            try:
+                chunks = list(model.stream([HumanMessage(content="hi")]))
+            except ValueError:
+                chunks = []
+
+        self.assertEqual("".join(c.content for c in chunks), "")
+
+    def test_anthropic_invoke_tool_use_json_blocks_are_parsed(self):
+        payload = {
+            "id": "msg_456",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-sonnet-4-6",
+            "content": [
+                {"type": "tool_use", "id": "tool_2", "name": "read_url", "input": {"url": "https://example.com"}},
+            ],
+            "usage": {"input_tokens": 11, "output_tokens": 2},
+        }
+        model = ProxyGatewayChatModel(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="k",
+            base_url="https://x/api/v1",
+        )
+        with patch(
+            "backend.proxy_chat_model.request.urlopen",
+            return_value=_FakeHttpResponse(json.dumps(payload).encode("utf-8")),
+        ):
+            out = model.invoke([HumanMessage(content="hi")])
+
+        self.assertEqual(out.tool_calls[0]["name"], "read_url")
+        self.assertEqual(out.tool_calls[0]["args"], {"url": "https://example.com"})
+
+    def test_anthropic_accumulator_recovers_complete_tool_use_at_eof(self):
+        accumulator = _anthropic_messages._AnthropicStreamAccumulator()
+        accumulator.add_event({
+            "type": "message_start",
+            "message": {"id": "msg_1", "model": "claude-sonnet-4-6"},
+        })
+        accumulator.add_event({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "tool_use", "id": "tool_1", "name": "web_search"},
+        })
+        accumulator.add_event({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": "{\"query\":\"weather\"}"},
+        })
+
+        blocks = accumulator.final_blocks(allow_eof_fallback=True)
+        self.assertIsNotNone(blocks)
+        self.assertEqual(blocks[0]["type"], "tool_use")
+        self.assertEqual(blocks[0]["input"], {"query": "weather"})
+
+    def test_anthropic_accumulator_does_not_recover_incomplete_tool_use_at_eof(self):
+        accumulator = _anthropic_messages._AnthropicStreamAccumulator()
+        accumulator.add_event({
+            "type": "message_start",
+            "message": {"id": "msg_1", "model": "claude-sonnet-4-6"},
+        })
+        accumulator.add_event({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "tool_use", "id": "tool_1", "name": "web_search"},
+        })
+        accumulator.add_event({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": "{\"query\":\"wea"},
+        })
+
+        self.assertIsNone(accumulator.final_blocks(allow_eof_fallback=True))
+
     # ── Google streaming tests ──
 
     def test_google_stream_text_chunks(self):
@@ -631,15 +1181,14 @@ class TestProxyChatModel(unittest.TestCase):
         for thinking, expected_effort in [(True, "high"), (False, "low")]:
             captured = {}
 
-            def _fake_urlopen(req, timeout=0):  # noqa: ARG001
-                captured["body"] = json.loads(req.data.decode("utf-8"))
-                return _FakeHttpResponse(b"", lines=_openai_sse_lines(completed))
-
             model = ProxyGatewayChatModel(
                 provider="openai", model="gpt-5.3-codex", api_key="k",
                 base_url="https://x/api/v1", thinking_mode=thinking,
             )
-            with patch("backend.proxy_chat_model.request.urlopen", side_effect=_fake_urlopen):
+            with patch(
+                "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+                side_effect=_fake_openai_sse(_openai_sse_lines(completed), captured),
+            ):
                 model.invoke([HumanMessage(content="hi")])
 
             reasoning = captured["body"].get("reasoning")
@@ -656,15 +1205,14 @@ class TestProxyChatModel(unittest.TestCase):
         }
         captured = {}
 
-        def _fake_urlopen(req, timeout=0):  # noqa: ARG001
-            captured["body"] = json.loads(req.data.decode("utf-8"))
-            return _FakeHttpResponse(b"", lines=_openai_sse_lines(completed))
-
         model = ProxyGatewayChatModel(
             provider="openai", model="gpt-5.3-codex", api_key="k",
             base_url="https://x/api/v1", thinking_mode=True,
         )
-        with patch("backend.proxy_chat_model.request.urlopen", side_effect=_fake_urlopen):
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(_openai_sse_lines(completed), captured),
+        ):
             model.invoke([HumanMessage(content="hi")])
 
         allowed = {"model", "input", "store", "stream", "text", "reasoning", "tools", "tool_choice"}
@@ -771,15 +1319,14 @@ class TestDispatchEdgeCases(unittest.TestCase):
         ]
         captured = {}
 
-        def _fake_urlopen(req, timeout=0):  # noqa: ARG001
-            captured["body"] = json.loads(req.data.decode("utf-8"))
-            return _FakeHttpResponse(b"", lines=lines)
-
         model = ProxyGatewayChatModel(
             provider="openai", model="gpt-5.3-codex", api_key="k",
             base_url="https://x/api/v1", thinking_mode=False,
         )
-        with patch("backend.proxy_chat_model.request.urlopen", side_effect=_fake_urlopen):
+        with patch(
+            "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+            side_effect=_fake_openai_sse(lines, captured),
+        ):
             list(model.stream([HumanMessage(content="hi")]))
 
         self.assertEqual(captured["body"]["reasoning"]["effort"], "low")
@@ -897,8 +1444,8 @@ class TestParseEdgeCases(unittest.TestCase):
         )
         with (
             patch(
-                "backend.proxy_chat_model.request.urlopen",
-                return_value=_FakeHttpResponse(b"", lines=lines),
+                "backend.infrastructure.protocols.openai_responses._post_responses_sse",
+                side_effect=_fake_openai_sse(lines),
             ),
             self.assertRaises(ValueError),
         ):
@@ -934,6 +1481,85 @@ class TestSseParseLogging(unittest.TestCase):
                 pass
         warn_mock.assert_called()
         self.assertIn("malformed", warn_mock.call_args[0][0].lower())
+
+
+class TestAnthropicToolUseInputFallback(unittest.TestCase):
+    """§2: tool_use blocks with non-dict input should be kept with args={}."""
+
+    def test_tool_use_input_null_preserved_with_empty_args(self):
+        from backend.infrastructure.protocols.anthropic_messages import _parse_anthropic_content_blocks
+
+        blocks = [
+            {"type": "text", "text": "calling tool"},
+            {"type": "tool_use", "id": "t1", "name": "search", "input": None},
+        ]
+        text_parts, _reasoning, tool_calls = _parse_anthropic_content_blocks(blocks)
+        self.assertEqual(text_parts, ["calling tool"])
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["name"], "search")
+        self.assertEqual(tool_calls[0]["args"], {})
+
+    def test_tool_use_input_string_preserved_with_empty_args(self):
+        from backend.infrastructure.protocols.anthropic_messages import _parse_anthropic_content_blocks
+
+        blocks = [
+            {"type": "tool_use", "id": "t2", "name": "fetch", "input": "bad"},
+        ]
+        _text, _reasoning, tool_calls = _parse_anthropic_content_blocks(blocks)
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["args"], {})
+
+    def test_tool_use_input_dict_passes_through(self):
+        from backend.infrastructure.protocols.anthropic_messages import _parse_anthropic_content_blocks
+
+        blocks = [
+            {"type": "tool_use", "id": "t3", "name": "calc", "input": {"x": 1}},
+        ]
+        _text, _reasoning, tool_calls = _parse_anthropic_content_blocks(blocks)
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["args"], {"x": 1})
+
+
+class TestMergeValuesOptimization(unittest.TestCase):
+    """§4a: _merge_values scalar fast-path and edge cases."""
+
+    def test_scalar_merge_returns_same_object(self):
+        from backend.infrastructure.protocols.openai_responses import _merge_values
+
+        result = _merge_values(None, 42, path=(), incoming_has_priority=True, incoming_higher_precedence=False)
+        self.assertEqual(result, 42)
+
+        result = _merge_values("hello", None, path=(), incoming_has_priority=True, incoming_higher_precedence=False)
+        self.assertEqual(result, "hello")
+
+    def test_nested_dict_merge(self):
+        from backend.infrastructure.protocols.openai_responses import _merge_values
+
+        existing = {"a": {"b": 1, "c": 2}, "d": 3}
+        incoming = {"a": {"b": 10, "e": 5}}
+        result = _merge_values(existing, incoming, path=(), incoming_has_priority=True, incoming_higher_precedence=False)
+        self.assertEqual(result["a"]["b"], 10)
+        self.assertEqual(result["a"]["c"], 2)
+        self.assertEqual(result["a"]["e"], 5)
+        self.assertEqual(result["d"], 3)
+
+    def test_list_merge_different_lengths(self):
+        from backend.infrastructure.protocols.openai_responses import _merge_values
+
+        existing = [1, 2]
+        incoming = [10, 20, 30]
+        result = _merge_values(existing, incoming, path=(), incoming_has_priority=True, incoming_higher_precedence=False)
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[2], 30)
+
+    def test_immutable_scalar_not_deepcopied(self):
+        from backend.infrastructure.protocols.openai_responses import _merge_values
+
+        result = _merge_values(None, True, path=(), incoming_has_priority=True, incoming_higher_precedence=False)
+        self.assertIs(result, True)
+
+        result = _merge_values(None, 3.14, path=(), incoming_has_priority=True, incoming_higher_precedence=False)
+        self.assertEqual(result, 3.14)
 
 
 if __name__ == "__main__":

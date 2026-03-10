@@ -3,14 +3,6 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 const MOBILE_MEDIA_QUERY = "(max-width: 600px)";
 const SESSION_OVERLAY_RATIO = 2.7;
 
-function isMobileViewport() {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return false;
-  }
-
-  return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
-}
-
 function getElementWidth(element) {
   if (!element) return 0;
   const rectWidth = element.getBoundingClientRect?.().width;
@@ -23,11 +15,18 @@ function getElementWidth(element) {
 export function useResponsiveSessionSidebar() {
   const appShellRef = useRef(null);
   const sidebarRef = useRef(null);
-  const [isSessionOverlay, setIsSessionOverlay] = useState(() => isMobileViewport());
+  const isMobileRef = useRef(false);
+  const [isSessionOverlay, setIsSessionOverlay] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    const mobile = window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+    isMobileRef.current = mobile;
+    return mobile;
+  });
 
   const syncLayoutMode = useCallback(() => {
-    const viewportMobile = isMobileViewport();
-    if (viewportMobile) {
+    if (isMobileRef.current) {
       setIsSessionOverlay(true);
       return;
     }
@@ -52,20 +51,24 @@ export function useResponsiveSessionSidebar() {
 
     const mediaQueryList =
       typeof window.matchMedia === "function" ? window.matchMedia(MOBILE_MEDIA_QUERY) : null;
-    const handleViewportChange = () => syncLayoutMode();
+
+    const handleMediaChange = (e) => {
+      isMobileRef.current = e.matches;
+      syncLayoutMode();
+    };
 
     if (mediaQueryList) {
       if (typeof mediaQueryList.addEventListener === "function") {
-        mediaQueryList.addEventListener("change", handleViewportChange);
+        mediaQueryList.addEventListener("change", handleMediaChange);
       } else if (typeof mediaQueryList.addListener === "function") {
-        mediaQueryList.addListener(handleViewportChange);
+        mediaQueryList.addListener(handleMediaChange);
       }
     }
 
-    window.addEventListener("resize", handleViewportChange);
-
     let resizeObserver = null;
-    if (typeof ResizeObserver === "function") {
+    const hasResizeObserver = typeof ResizeObserver === "function";
+
+    if (hasResizeObserver) {
       resizeObserver = new ResizeObserver(() => syncLayoutMode());
       if (appShellRef.current) {
         resizeObserver.observe(appShellRef.current);
@@ -73,19 +76,24 @@ export function useResponsiveSessionSidebar() {
       if (sidebarRef.current) {
         resizeObserver.observe(sidebarRef.current);
       }
+    } else {
+      window.addEventListener("resize", syncLayoutMode);
     }
 
     return () => {
       if (mediaQueryList) {
         if (typeof mediaQueryList.removeEventListener === "function") {
-          mediaQueryList.removeEventListener("change", handleViewportChange);
+          mediaQueryList.removeEventListener("change", handleMediaChange);
         } else if (typeof mediaQueryList.removeListener === "function") {
-          mediaQueryList.removeListener(handleViewportChange);
+          mediaQueryList.removeListener(handleMediaChange);
         }
       }
 
-      window.removeEventListener("resize", handleViewportChange);
-      resizeObserver?.disconnect();
+      if (hasResizeObserver) {
+        resizeObserver?.disconnect();
+      } else {
+        window.removeEventListener("resize", syncLayoutMode);
+      }
     };
   }, [syncLayoutMode]);
 

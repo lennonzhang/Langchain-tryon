@@ -66,7 +66,7 @@ class ChatOnceUseCase:
         debug_stream: bool = False,
     ) -> str:
         resolved_model = self._deps.resolve_model(model)
-        token = self._deps.registry.register(request_id)
+        token = self._deps.registry.register(request_id, kind="once")
         ctx = ChatExecutionContext(
             request_id=request_id,
             resolved_model=resolved_model,
@@ -142,7 +142,7 @@ class StreamChatUseCase:
         debug_stream: bool = False,
     ) -> SseEventStream:
         resolved_model = self._deps.resolve_model(model)
-        token = self._deps.registry.register(request_id)
+        token = self._deps.registry.register(request_id, kind="stream")
         ctx = ChatExecutionContext(
             request_id=request_id,
             resolved_model=resolved_model,
@@ -171,12 +171,12 @@ class StreamChatUseCase:
         return SseEventStream(sink, cancel_token=token)
 
     def _produce_events(self, *, sink: EventSink, ctx: ChatExecutionContext, api_key: str, message: str, history: list, images):
-        client = self._deps.build_chat_model(
-            api_key,
-            ctx.resolved_model,
-            thinking_mode=ctx.thinking_mode,
-        )
         try:
+            client = self._deps.build_chat_model(
+                api_key,
+                ctx.resolved_model,
+                thinking_mode=ctx.thinking_mode,
+            )
             if should_use_agentic_flow(ctx.resolved_model, ctx.agent_mode):
                 terminal_seen = False
                 for event in stream_agentic(

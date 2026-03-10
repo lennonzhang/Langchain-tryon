@@ -33,6 +33,10 @@ L3 deep index:
 - Path index: [`docs/assistant/path-index.md`](docs/assistant/path-index.md)
 - Validation + release checklist: [`docs/assistant/validation-and-release-checklist.md`](docs/assistant/validation-and-release-checklist.md)
 
+L4 detailed references:
+
+- Error status matrix: [`docs/assistant/error-status-matrix.md`](docs/assistant/error-status-matrix.md)
+
 ## Fast Defaults
 
 - Primary chat path: `POST /api/chat/stream`

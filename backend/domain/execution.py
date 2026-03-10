@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from dataclasses import dataclass
+from typing import Literal
 
 
 class CancellationToken:
@@ -17,20 +19,51 @@ class CancellationToken:
         return self._event.is_set()
 
 
+ExecutionKind = Literal["stream", "once"]
+
+
+@dataclass(frozen=True)
+class RegisteredExecution:
+    request_id: str
+    kind: ExecutionKind
+    token: CancellationToken
+
+
+class DuplicateRequestIdError(RuntimeError):
+    def __init__(self, request_id: str) -> None:
+        self.request_id = request_id
+        super().__init__("request_id already active")
+
+
 class CancellationRegistry:
     def __init__(self) -> None:
-        self._tokens: dict[str, CancellationToken] = {}
+        self._executions: dict[str, RegisteredExecution] = {}
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
 
-    def register(self, request_id: str, token: CancellationToken | None = None) -> CancellationToken:
-        with self._lock:
+    def register(
+        self,
+        request_id: str,
+        *,
+        kind: ExecutionKind = "stream",
+        token: CancellationToken | None = None,
+    ) -> CancellationToken:
+        with self._condition:
+            if request_id in self._executions:
+                raise DuplicateRequestIdError(request_id)
             created = token or CancellationToken()
-            self._tokens[request_id] = created
+            self._executions[request_id] = RegisteredExecution(
+                request_id=request_id,
+                kind=kind,
+                token=created,
+            )
+            self._condition.notify_all()
             return created
 
     def get(self, request_id: str) -> CancellationToken | None:
-        with self._lock:
-            return self._tokens.get(request_id)
+        with self._condition:
+            entry = self._executions.get(request_id)
+            return entry.token if entry is not None else None
 
     def cancel(self, request_id: str) -> bool:
         token = self.get(request_id)
@@ -39,11 +72,34 @@ class CancellationRegistry:
         token.cancel()
         return True
 
+    def active_stream_count(self) -> int:
+        with self._condition:
+            return sum(1 for entry in self._executions.values() if entry.kind == "stream")
+
+    def cancel_active_streams(self) -> int:
+        with self._condition:
+            stream_tokens = [entry.token for entry in self._executions.values() if entry.kind == "stream"]
+        for token in stream_tokens:
+            token.cancel()
+        return len(stream_tokens)
+
+    def wait_for_no_active_streams(self, timeout: float) -> bool:
+        timeout_s = max(0.0, float(timeout))
+        deadline = time.monotonic() + timeout_s
+        with self._condition:
+            while any(entry.kind == "stream" for entry in self._executions.values()):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._condition.wait(timeout=remaining)
+            return True
+
     def finish(self, request_id: str, token: CancellationToken) -> None:
-        with self._lock:
-            current = self._tokens.get(request_id)
-            if current is token:
-                self._tokens.pop(request_id, None)
+        with self._condition:
+            current = self._executions.get(request_id)
+            if current is not None and current.token is token:
+                self._executions.pop(request_id, None)
+                self._condition.notify_all()
 
 
 @dataclass(frozen=True)
