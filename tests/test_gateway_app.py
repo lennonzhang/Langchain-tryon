@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
+from backend.domain.execution import DuplicateRequestIdError
 from backend.gateway import app as gateway_app_module
 from backend.gateway.admission import QueueFullError, QueueTimeoutError
 from backend.gateway.app import app
@@ -13,6 +14,7 @@ class TestGatewayApp(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
         app.state.debug_stream = False
+        app.state.shutdown_requested = False
         self._too_long_request_id = "r" * 257
 
     def test_capabilities_route(self):
@@ -78,10 +80,26 @@ class TestGatewayApp(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {"error": "gateway queue timeout"})
 
+    def test_chat_route_returns_409_for_duplicate_active_request_id(self):
+        payload = {"message": "hello", "request_id": "rid-duplicate"}
+        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
+            gate.slot.return_value.__aenter__ = AsyncMock(return_value=None)
+            gate.slot.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch("backend.gateway.app.chat_once", side_effect=DuplicateRequestIdError("rid-duplicate")):
+                response = self.client.post("/api/chat", json=payload)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json(), {"error": "request_id already active"})
+
     def test_chat_route_rejects_too_long_request_id(self):
         response = self.client.post("/api/chat", json={"message": "hello", "request_id": self._too_long_request_id})
         self.assertEqual(response.status_code, 400)
         self.assertIn("request_id: too long", response.json()["error"])
+
+    def test_chat_route_returns_503_while_shutdown_requested(self):
+        app.state.shutdown_requested = True
+        response = self.client.post("/api/chat", json={"message": "hello", "request_id": "rid-shutdown-chat"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"error": "Server shutting down"})
 
     def test_chat_route_content_length_precheck_returns_413(self):
         payload = {"message": "hello", "request_id": "rid-precheck"}
@@ -117,10 +135,33 @@ class TestGatewayApp(unittest.TestCase):
         self.assertIn('"finish_reason": "error"', body)
         self.assertIn('"request_id": "rid-stream-queue-timeout"', body)
 
+    def test_chat_stream_duplicate_request_id_emits_error_and_done(self):
+        payload = {"message": "hello", "request_id": "rid-stream-duplicate"}
+        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
+            gate.acquire = AsyncMock(return_value=None)
+            gate.release = AsyncMock(return_value=None)
+            with patch(
+                "backend.gateway.app.stream_chat",
+                side_effect=DuplicateRequestIdError("rid-stream-duplicate"),
+            ):
+                response = self.client.post("/api/chat/stream", json=payload)
+        self.assertEqual(response.status_code, 200)
+        body = response.text
+        self.assertIn('"type": "error"', body)
+        self.assertIn('"error": "request_id already active"', body)
+        self.assertIn('"type": "done"', body)
+        self.assertIn('"finish_reason": "error"', body)
+
     def test_chat_stream_rejects_too_long_request_id(self):
         response = self.client.post("/api/chat/stream", json={"message": "hello", "request_id": self._too_long_request_id})
         self.assertEqual(response.status_code, 400)
         self.assertIn("request_id: too long", response.json()["error"])
+
+    def test_chat_stream_returns_503_while_shutdown_requested(self):
+        app.state.shutdown_requested = True
+        response = self.client.post("/api/chat/stream", json={"message": "hello", "request_id": "rid-shutdown-stream"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"error": "Server shutting down"})
 
     def test_chat_route_forwards_debug_stream_flag(self):
         payload = {"message": "hello", "request_id": "rid-debug"}
@@ -150,3 +191,11 @@ class TestGatewayApp(unittest.TestCase):
             response = self.client.get("/..%2FREADME.md")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"error": "Forbidden"})
+
+    def test_cancel_route_stays_available_while_shutdown_requested(self):
+        app.state.shutdown_requested = True
+        with patch("backend.gateway.app.cancel_chat", return_value={"cancelled": True}) as cancel_mock:
+            response = self.client.post("/api/chat/cancel", json={"request_id": "rid-shutdown-cancel"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"cancelled": True})
+        cancel_mock.assert_called_once_with("rid-shutdown-cancel")

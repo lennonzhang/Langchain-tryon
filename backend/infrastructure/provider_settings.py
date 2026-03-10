@@ -133,3 +133,15 @@ def resolve_provider_timeout(provider: str, default_seconds: float = 300.0) -> f
             continue
         return max(30.0, value)
     return default_seconds
+
+
+def resolve_openai_sse_read_timeout(default_seconds: float = 600.0) -> float:
+    load_env_file()
+    raw = os.getenv("OPENAI_SSE_READ_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return default_seconds
+    try:
+        value = float(raw)
+    except ValueError:
+        return default_seconds
+    return max(30.0, value)

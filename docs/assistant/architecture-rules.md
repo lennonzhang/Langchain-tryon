@@ -23,6 +23,10 @@
   - frontend stop first hits `/api/chat/cancel`
   - backend cancellation is best-effort but must stop local streaming immediately
   - user stop terminates as `done(stop)`, not `error`
+- Local `python server.py` shutdown is stream-aware:
+  - first `Ctrl+C` gates new `/api/chat` and `/api/chat/stream` requests
+  - only active streaming requests are batch-cancelled for shutdown drain
+  - local shutdown waits briefly for stream registry drain before exit
 
 ## Frontend Stream and Session Rules
 

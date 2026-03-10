@@ -74,6 +74,7 @@
 - Vercel wrappers: `api/capabilities.py`, `api/chat.py`, `api/chat/stream.py`, `api/chat/cancel.py`
 - Release notes: `CHANGELOG.md`
 - Runtime/readme: `README.md`
+- Detailed API failure lookup: `docs/assistant/error-status-matrix.md`
 
 ## Related
 

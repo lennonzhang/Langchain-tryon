@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { shortModelName } from "../utils/models";
 
 function ModelSelect({
@@ -12,8 +12,32 @@ function ModelSelect({
   thinkingMode,
   onThinkingModeChange,
 }) {
+  const hasModels = models.length > 0;
   const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const ref = useRef(null);
+  const triggerRef = useRef(null);
+  const optionRefs = useRef([]);
+
+  const openMenu = useCallback(() => {
+    if (!hasModels) return;
+    setOpen(true);
+    const idx = models.indexOf(value);
+    setActiveIndex(idx >= 0 ? idx : 0);
+  }, [hasModels, models, value]);
+
+  useEffect(() => {
+    if (open && activeIndex >= 0 && optionRefs.current[activeIndex]) {
+      optionRefs.current[activeIndex].focus();
+    }
+  }, [open, activeIndex]);
+
+  useEffect(() => {
+    if (!hasModels && open) {
+      setOpen(false);
+      setActiveIndex(-1);
+    }
+  }, [hasModels, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -21,7 +45,10 @@ function ModelSelect({
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
     }
     function handleKey(e) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     }
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
@@ -31,21 +58,52 @@ function ModelSelect({
     };
   }, [open]);
 
+  const handleListKeyDown = useCallback(
+    (e) => {
+      if (!hasModels) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIndex((prev) => (prev + 1) % models.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIndex((prev) => (prev - 1 + models.length) % models.length);
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        if (activeIndex >= 0 && activeIndex < models.length) {
+          onChange(models[activeIndex]);
+          setOpen(false);
+          triggerRef.current?.focus();
+        }
+      }
+    },
+    [hasModels, models, activeIndex, onChange],
+  );
+
   const activeTags = [];
   if (webSearch) activeTags.push("Search");
   if (supportsThinking && thinkingMode) activeTags.push("Thinking");
+
+  const triggerDisabled = disabled || !hasModels;
+  const triggerLabel = hasModels ? shortModelName(value) : "No models available";
 
   return (
     <div className={`model-select ${open ? "is-open" : ""}`} ref={ref}>
       <button
         type="button"
+        ref={triggerRef}
         className="model-trigger"
-        disabled={disabled}
-        onClick={() => setOpen((prev) => !prev)}
+        disabled={triggerDisabled}
+        onClick={() => (open ? setOpen(false) : openMenu())}
+        onKeyDown={(e) => {
+          if (!open && hasModels && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+            e.preventDefault();
+            openMenu();
+          }
+        }}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="model-trigger-label">{shortModelName(value)}</span>
+        <span className="model-trigger-label">{triggerLabel}</span>
         {activeTags.length > 0 && (
           <span className="model-trigger-tags">
             {activeTags.map((tag) => (
@@ -57,16 +115,19 @@ function ModelSelect({
       </button>
       {open && (
         <div className="model-menu">
-          <ul className="model-menu-list" role="listbox">
-            {models.map((m) => (
+          <ul className="model-menu-list" role="listbox" onKeyDown={handleListKeyDown}>
+            {models.map((m, i) => (
               <li
                 key={m}
+                ref={(el) => { optionRefs.current[i] = el; }}
                 role="option"
+                tabIndex={i === activeIndex ? 0 : -1}
                 aria-selected={m === value}
-                className={`model-option ${m === value ? "is-selected" : ""}`}
+                className={`model-option ${m === value ? "is-selected" : ""}${i === activeIndex ? " is-focused" : ""}`}
                 onClick={() => {
                   onChange(m);
                   setOpen(false);
+                  triggerRef.current?.focus();
                 }}
               >
                 <span className="model-option-check" aria-hidden="true">

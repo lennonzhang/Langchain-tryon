@@ -51,10 +51,16 @@
 - `anthropic_messages`
   - Endpoint: `POST /messages` (Anthropic Messages API)
   - Streaming: real SSE stream
+  - supports lifecycle-based recovery from `message_start`, `content_block_*`, `message_delta`, and `message_stop`
+  - `tool_use` is reconstructed from `input_json_delta` only when the final JSON is complete and parseable
+  - `message_stop` remains preferred; EOF fallback only recovers visible text or complete tool-use payloads
 - `openai_responses`
   - API style: OpenAI Responses API (`/responses`)
   - Streaming: real SSE stream (`stream: true` required)
   - `reasoning` field is required
+  - supports lifecycle-based reconstruction from `response.created`, `response.output_item.added`, and `response.output_item.done`
+  - multiple `response.output_item.added` events for the same item are merged; when `output_index` is absent, fallback ordering uses first-seen order
+  - `response.completed` remains preferred when present; EOF fallback is allowed only after stream end when recoverable output items exist
 - `google_generate_content`
   - Invoke endpoint: `POST /models/{model}:generateContent`
   - Stream endpoint: `POST /models/{model}:streamGenerateContent?alt=sse`
@@ -76,6 +82,7 @@
   - `<PROVIDER>_TIMEOUT_SECONDS`
   - fallback `MODEL_TIMEOUT_SECONDS`
   - fallback default `300`
+- OpenAI Responses streaming also supports a dedicated SSE read-idle timeout via `OPENAI_SSE_READ_TIMEOUT_SECONDS` (default `600`) so long quiet reasoning phases do not get normalized as generic upstream failures.
 - Per-provider SSL verification can be disabled via `<PROVIDER>_SSL_VERIFY=false` (e.g. `ANTHROPIC_SSL_VERIFY=false`). This is useful when routing through third-party proxies with hostname-mismatched certificates.
 - Disabled SSL verification is allowed but logged as a warning at startup/runtime resolution time.
 - Upstream errors are normalized by `backend/provider_event_normalizer.py` into a consistent shape like `provider=X | protocol=Y | type=T | status=Z | message=...`.

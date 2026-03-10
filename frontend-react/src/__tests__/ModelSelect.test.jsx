@@ -11,6 +11,7 @@ const MODELS = [
 ];
 
 function StatefulHarness({
+  models = MODELS,
   initialValue = MODELS[0],
   initialWebSearch = false,
   initialThinkingMode = false,
@@ -26,7 +27,7 @@ function StatefulHarness({
 
   return (
     <ModelSelect
-      models={MODELS}
+      models={models}
       value={value}
       disabled={disabled}
       onChange={(next) => {
@@ -131,5 +132,78 @@ describe("ModelSelect", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("supports ArrowDown/ArrowUp keyboard navigation", async () => {
+    render(<StatefulHarness />);
+
+    const trigger = screen.getByRole("button", { name: /kimi-k2\.5/i });
+    await userEvent.click(trigger);
+
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveFocus();
+
+    fireEvent.keyDown(options[0], { key: "ArrowDown" });
+    expect(options[1]).toHaveFocus();
+
+    fireEvent.keyDown(options[1], { key: "ArrowUp" });
+    expect(options[0]).toHaveFocus();
+  });
+
+  it("selects an option with Enter and returns focus to trigger", async () => {
+    const onChange = vi.fn();
+    render(<StatefulHarness onChange={onChange} />);
+
+    const trigger = screen.getByRole("button", { name: /kimi-k2\.5/i });
+    await userEvent.click(trigger);
+
+    const options = screen.getAllByRole("option");
+    fireEvent.keyDown(options[0], { key: "ArrowDown" });
+    fireEvent.keyDown(options[1], { key: "Enter" });
+
+    expect(onChange).toHaveBeenCalledWith("qwen/qwen3.5-397b-a17b");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.getByRole("button", { name: /qwen3\.5-397b-a17b/i })).toHaveFocus();
+  });
+
+  it("selects an option with Space key", async () => {
+    const onChange = vi.fn();
+    render(<StatefulHarness onChange={onChange} />);
+
+    const trigger = screen.getByRole("button", { name: /kimi-k2\.5/i });
+    await userEvent.click(trigger);
+
+    const options = screen.getAllByRole("option");
+    fireEvent.keyDown(options[0], { key: " " });
+
+    expect(onChange).toHaveBeenCalledWith("moonshotai/kimi-k2.5");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("returns focus to trigger on Escape", async () => {
+    render(<StatefulHarness />);
+
+    const trigger = screen.getByRole("button", { name: /kimi-k2\.5/i });
+    await userEvent.click(trigger);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("shows a disabled empty state when no models are available", async () => {
+    const onChange = vi.fn();
+    render(<StatefulHarness models={[]} initialValue="" onChange={onChange} />);
+
+    const trigger = screen.getByRole("button", { name: /no models available/i });
+    expect(trigger).toBeDisabled();
+
+    await userEvent.click(trigger);
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    fireEvent.keyDown(trigger, { key: "Enter" });
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

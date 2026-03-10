@@ -21,11 +21,13 @@
 - Gateway queue timeout env: `GATEWAY_QUEUE_TIMEOUT_SECONDS`
 - Shared model timeout env: `MODEL_TIMEOUT_SECONDS`
 - Provider timeout envs: `<PROVIDER>_TIMEOUT_SECONDS`
+- OpenAI SSE read-idle timeout env: `OPENAI_SSE_READ_TIMEOUT_SECONDS` (default `600`)
 - Web loader per-page read timeout env: `WEB_LOADER_TIMEOUT_SECONDS` (default `10`)
 - Web loader connect timeout env: `WEB_LOADER_CONNECT_TIMEOUT` (default `5`)
 - Web search total budget env: `WEB_SEARCH_TOTAL_BUDGET_SECONDS` (default `15`)
 - Web loader max pages env: `WEB_LOADER_MAX_PAGES` (default `3`)
 - Web loader concurrency env: `WEB_LOADER_CONCURRENCY` (default `3`)
+- Local shutdown drain env: `SHUTDOWN_CANCEL_DRAIN_SECONDS` (default `2`)
 - `thinking_mode` default: `true`
 - Auto `agent_mode` when omitted:
   - enabled: qwen, glm, claude, codex, gemini
@@ -38,6 +40,11 @@
 python server.py
 python -m unittest discover -s tests -v
 ```
+
+Local `python server.py` shutdown behavior:
+
+- first `Ctrl+C`: reject new `/api/chat` and `/api/chat/stream` requests, cancel active streaming requests, and wait up to `SHUTDOWN_CANCEL_DRAIN_SECONDS`
+- second `Ctrl+C`: force exit immediately
 
 ```bash
 # frontend (from frontend-react/)

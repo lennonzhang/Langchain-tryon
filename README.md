@@ -39,6 +39,8 @@ GATEWAY_MAX_CONCURRENCY=16
 GATEWAY_MAX_QUEUE_SIZE=64
 GATEWAY_QUEUE_TIMEOUT_SECONDS=15
 MODEL_TIMEOUT_SECONDS=300
+OPENAI_SSE_READ_TIMEOUT_SECONDS=600
+SHUTDOWN_CANCEL_DRAIN_SECONDS=2
 ```
 
 Visible model lists (optional, but required if you pin `*_MODELS` in `.env`):
@@ -64,6 +66,7 @@ GOOGLE_BASE_URL=
 NVIDIA_BASE_URL=
 ANTHROPIC_TIMEOUT_SECONDS=
 OPENAI_TIMEOUT_SECONDS=
+OPENAI_SSE_READ_TIMEOUT_SECONDS=
 GOOGLE_TIMEOUT_SECONDS=
 NVIDIA_TIMEOUT_SECONDS=
 ```
@@ -82,11 +85,21 @@ Timeout precedence:
 - `MODEL_TIMEOUT_SECONDS`
 - default `300`
 
+OpenAI Responses SSE read-idle timeout:
+
+- `OPENAI_SSE_READ_TIMEOUT_SECONDS`
+- default `600`
+
 ## 3. Run Locally
 
 ```powershell
 python server.py
 ```
+
+Local shutdown behavior:
+
+- first `Ctrl+C` rejects new chat requests, cancels active streaming requests, and waits up to `SHUTDOWN_CANCEL_DRAIN_SECONDS` before exiting
+- second `Ctrl+C` forces immediate exit
 
 Enable stream debug logs:
 
@@ -115,6 +128,12 @@ Open `http://127.0.0.1:8000`.
 - OpenAI Responses constraints:
   - omit top-level `temperature` and `top_p`
   - always include `reasoning` (`effort: "high"` / `"low"`)
+  - lifecycle fallback merges repeated `response.output_item.added` snapshots for the same item
+  - streaming read-idle timeout is controlled separately from the shared provider timeout
+- Anthropic Messages constraints:
+  - lifecycle recovery supports `message_start`, `content_block_*`, `message_delta`, and `message_stop`
+  - `tool_use` is reconstructed from `input_json_delta` only when the final JSON is complete and parseable
+  - `message_stop` is preferred; EOF fallback only recovers visible text or complete tool-use payloads
 - Stream/upstream error diagnostics use normalized provider detail (`provider`, `protocol`, `type`, optional `status`, `message`); SSE error frames preserve upstream `error.type` when available.
 - Media input: kimi only
 - Search events and reasoning/token streams are shown in dedicated sections.
@@ -124,6 +143,8 @@ Open `http://127.0.0.1:8000`.
 - Switching from unsent draft to an existing session preserves draft text; first send from draft creates a real session and clears draft.
 - Composer send button switches to `Stop` while the active session is streaming; when another session is streaming, send remains disabled.
 - `Stop` first calls `POST /api/chat/cancel`, then aborts the local SSE request so backend cancellation can start immediately.
+- Local `python server.py` shutdown uses the same backend cancellation path for active streaming requests before exit.
+- If the capabilities payload contains no selectable models, the model selector stays visible but is disabled and shows `No models available`.
 - `context_usage` is emitted at start and refreshed with a terminal `phase=final` update before `done`.
 - Session sidebar keeps a stable responsive width on desktop/tablet and no longer resizes with long session content.
 - On pointer-hover devices, the session delete action appears on card hover/focus and remains disabled for running sessions.
@@ -136,6 +157,9 @@ Request limits:
 
 - JSON body max size: `10 MB`
 - `request_id` max length: `256`
+- active top-level `request_id` values must be unique:
+  - `POST /api/chat` returns `409` if the same `request_id` is already active
+  - `POST /api/chat/stream` emits `error` then `done(error)` for the same condition
 
 Expected SSE event types:
 
@@ -156,6 +180,23 @@ Every event is enriched with:
 Error invariant:
 
 - `error` is always followed by `done` with `finish_reason: "error"`.
+
+Common error responses:
+
+| Endpoint | Condition | HTTP / terminal behavior |
+| --- | --- | --- |
+| `POST /api/chat` | invalid JSON / validation failure / missing `message` | `400` JSON error |
+| `POST /api/chat` | payload too large | `413` JSON error |
+| `POST /api/chat` | active duplicate `request_id` | `409` JSON error |
+| `POST /api/chat` | queue full / queue timeout / shutdown drain | `503` JSON error |
+| `POST /api/chat` | upstream timeout | `504` JSON error |
+| `POST /api/chat` | other upstream failure | `502` JSON error |
+| `POST /api/chat/stream` | invalid JSON / validation failure / payload too large / shutdown drain | non-stream JSON error (`400` / `413` / `503`) |
+| `POST /api/chat/stream` | queue full / queue timeout / active duplicate `request_id` | SSE `error` then `done(error)` |
+| `POST /api/chat/stream` | upstream timeout / runtime failure after stream starts | SSE `error` then `done(error)` |
+| `POST /api/chat/cancel` | invalid JSON / missing or invalid `request_id` | `400` JSON error |
+| `POST /api/chat/cancel` | payload too large | `413` JSON error |
+| `POST /api/chat/cancel` | request missing | `200` with `{"cancelled": false, "reason": "request_not_found"}` |
 
 ## 6. Build and Test
 
