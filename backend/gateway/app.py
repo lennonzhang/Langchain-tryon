@@ -216,6 +216,12 @@ async def post_chat_stream(request: Request):
     except QueueTimeoutError as exc:
         return _stream_error_response(str(exc), req.request_id)
 
+    try:
+        api_key = _gateway_api_key()
+    except GatewayConfigurationError as exc:
+        await _ADMISSION_GATE.release()
+        return _stream_error_response(str(exc), req.request_id)
+
     def build_stream():
         return stream_chat(
             api_key,
