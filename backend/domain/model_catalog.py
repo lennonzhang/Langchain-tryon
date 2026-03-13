@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import threading
 
+from backend.settings.env_loader import load_env_file
+
 from .model_templates import MODEL_TEMPLATES
 
 _PROVIDER_ENV_KEYS = {
@@ -25,6 +27,7 @@ _ACTIVE_LOCK = threading.Lock()
 
 
 def _env_model_specs() -> list[tuple[str, str]] | None:
+    load_env_file()
     specs: list[tuple[str, str]] = []
     any_set = False
     for provider, env_key in _PROVIDER_ENV_KEYS.items():
