@@ -1,4 +1,5 @@
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -21,10 +22,11 @@ class TestGatewayApp(unittest.TestCase):
         self._api_key_patcher.start()
         self.addCleanup(self._api_key_patcher.stop)
 
-    def _first_asset_name(self) -> str:
-        assets_dir = gateway_app_module.FRONTEND_DIST_DIR / "assets"
-        asset = next(path for path in assets_dir.iterdir() if path.is_file())
-        return asset.name
+    @contextmanager
+    def _frontend_dist_fixture(self):
+        dist_dir = Path(__file__).resolve().parent / "fixtures" / "frontend_dist"
+        with patch.object(gateway_app_module, "FRONTEND_DIST_DIR", dist_dir):
+            yield "app.js"
 
     def test_capabilities_route(self):
         response = self.client.get("/api/capabilities")
@@ -264,19 +266,22 @@ class TestGatewayApp(unittest.TestCase):
         self.assertEqual(response.json(), {"error": "Forbidden"})
 
     def test_frontend_root_serves_index_with_no_cache(self):
-        response = self.client.get("/")
+        with self._frontend_dist_fixture():
+            response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-cache")
         self.assertIn("text/html", response.headers["content-type"])
 
     def test_frontend_spa_fallback_serves_index_with_no_cache(self):
-        response = self.client.get("/chat")
+        with self._frontend_dist_fixture():
+            response = self.client.get("/chat")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-cache")
         self.assertIn("text/html", response.headers["content-type"])
 
     def test_frontend_assets_are_served_with_immutable_cache_control(self):
-        response = self.client.get(f"/assets/{self._first_asset_name()}")
+        with self._frontend_dist_fixture() as asset_name:
+            response = self.client.get(f"/assets/{asset_name}")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "public, max-age=31536000, immutable")
 
