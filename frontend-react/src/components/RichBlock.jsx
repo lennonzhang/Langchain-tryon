@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
-import { toSafeHtml } from "../utils/markdown";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { toPlainHtml, toSafeHtml, ensureMarkdownLoaded, isMarkdownReady } from "../utils/markdown";
 import { ensurePrismLoaded } from "../utils/prism-loader";
 
 const MATHJAX_DEBOUNCE_MS = 500;
@@ -13,7 +13,23 @@ const MATHJAX_DEBOUNCE_MS = 500;
  * MathJax is scoped to this component's container to avoid O(N) full-page scans.
  */
 export default function RichBlock({ text, className, streaming = false }) {
-  const html = useMemo(() => toSafeHtml(text), [text]);
+  const [ready, setReady] = useState(isMarkdownReady);
+  useEffect(() => {
+    if (ready) return undefined;
+    let cancelled = false;
+
+    ensureMarkdownLoaded()
+      .then(() => {
+        if (!cancelled) setReady(true);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready]);
+
+  const html = useMemo(() => (ready ? toSafeHtml(text) : toPlainHtml(text)), [text, ready]);
   const containerRef = useRef(null);
   const copyResetTimersRef = useRef(new WeakMap());
   const copyResetTimerIdsRef = useRef(new Set());

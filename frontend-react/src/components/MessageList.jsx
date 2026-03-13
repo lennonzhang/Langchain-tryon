@@ -2,6 +2,7 @@ import { forwardRef, memo } from "react";
 import RichBlock from "./RichBlock";
 import StreamMessage from "./StreamMessage";
 import CopyButton from "./CopyButton";
+import { CONNECTED_TEXT } from "../utils/models";
 
 const UserMessage = memo(function UserMessage({ msg }) {
   return (
@@ -12,10 +13,15 @@ const UserMessage = memo(function UserMessage({ msg }) {
 });
 
 const AssistantMessage = memo(function AssistantMessage({ msg }) {
+  const isConnectedPlaceholder = msg.id === "connected" && msg.content === CONNECTED_TEXT;
   return (
     <div className="msg assistant">
-      {msg.content && <CopyButton text={msg.content} />}
-      <RichBlock className="assistant-body" text={msg.content} />
+      {!isConnectedPlaceholder && msg.content && <CopyButton text={msg.content} />}
+      {isConnectedPlaceholder ? (
+        <div className="assistant-body">{msg.content}</div>
+      ) : (
+        <RichBlock className="assistant-body" text={msg.content} />
+      )}
     </div>
   );
 });

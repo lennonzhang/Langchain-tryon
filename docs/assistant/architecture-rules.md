@@ -19,6 +19,10 @@
 - Do not rename SSE events silently.
 - Gateway admission is centralized in `backend/gateway/admission.py`; do not re-implement queueing or throttling in facade code.
 - Static frontend serving must remain rooted under the frontend dist directory; preserve path traversal protection when changing gateway routes.
+- Static frontend cache policy is split by artifact type:
+  - hashed `frontend/dist/assets/*` responses use immutable caching
+  - `index.html` and SPA fallbacks stay revalidated (`no-cache`)
+  - SSE responses stay streaming-safe (`Cache-Control: no-cache, no-transform`)
 - Request cancellation is registry-driven:
   - frontend stop first hits `/api/chat/cancel`
   - backend cancellation is best-effort but must stop local streaming immediately
@@ -53,6 +57,7 @@
 - Session sidebar uses responsive fixed width on desktop/tablet; avoid content-driven width growth.
 - Mobile (`<=600px`) and narrow layouts where the whole panel width is less than or equal to `sessionSidebarWidth * 2.7` use a left overlay drawer for sessions opened from the chat header trigger.
 - `RichBlock` debounces MathJax typesetting by `500ms`.
+- `RichBlock` must keep assistant text visible with a synchronous plain-text fallback until markdown parsing is ready; chunk load failure must not leave content blank.
 - `RichBlock` skips Prism highlighting while `streaming=true` and highlights code blocks once after stream completion (`streaming=false`).
 - `MessageList` message items (`UserMessage`, `AssistantMessage`) remain `memo()`-wrapped.
 - Reasoning display formatting is frontend-only: prefer `agent_step_start` boundaries and text heuristics for readability, without changing SSE event contracts.

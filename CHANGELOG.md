@@ -2,6 +2,86 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-13 (Model Catalog Env Bootstrap)
+
+### Summary
+
+Fixed the env-driven model catalog so `*_MODELS` allowlists from `.env` are loaded before the active model list is initialized.
+
+### Backend
+
+- Updated `backend/domain/model_catalog.py`:
+  - load `.env` before reading `NVIDIA_MODELS`, `ANTHROPIC_MODELS`, `OPENAI_MODELS`, and `GOOGLE_MODELS`
+  - keep the existing cached active catalog behavior unchanged after initialization
+
+### Tests
+
+- Updated `tests/test_model_registry.py`:
+  - added regression coverage proving `.env` loading happens before the active catalog is built
+
+## 2026-03-11 (Frontend Delivery Cache Policy)
+
+### Summary
+
+Tightened local and Vercel frontend delivery behavior so hashed static assets can be cached aggressively without changing SSE semantics or introducing in-process HTML caching.
+
+### Backend
+
+- Updated `backend/gateway/app.py`:
+  - preserved `FileResponse` for frontend files and passed `stat_result` after a single file validation pass
+  - serve hashed `frontend/dist/assets/*` files with `Cache-Control: public, max-age=31536000, immutable`
+  - serve `index.html` and SPA fallbacks with `Cache-Control: no-cache`
+  - changed SSE responses to `Cache-Control: no-cache, no-transform`
+
+### Deployment
+
+- Updated `vercel.json` to emit immutable cache headers for `/assets/*` so Vercel static asset delivery matches the local policy
+
+### Tests
+
+- Updated `tests/test_gateway_app.py` with coverage for:
+  - `/` and SPA fallback `Cache-Control: no-cache`
+  - `/assets/*` immutable cache headers
+  - SSE `Cache-Control: no-cache, no-transform`
+
+### Docs
+
+- Updated `docs/assistant/architecture-rules.md`
+- Updated `README.md`
+
+## 2026-03-11 (FCP-Safe Markdown Loading)
+
+### Summary
+
+Kept the frontend FCP-oriented asset optimizations, but removed the user-visible blank-message regression by making markdown rendering degrade to synchronous plain text until the async parser chunk is ready.
+
+### Frontend
+
+- Updated `frontend-react/src/utils/markdown.js`:
+  - added synchronous `toPlainHtml()` fallback rendering
+  - added idle-time markdown warmup scheduling support
+  - added test-only markdown loader reset/override hooks for cold-start and failure-path coverage
+- Updated `frontend-react/src/components/RichBlock.jsx`:
+  - render safe plain text immediately while markdown libraries are still loading
+  - upgrade to full markdown once the async parser chunk is available
+  - keep plain text visible when markdown chunk loading fails
+- Updated `frontend-react/src/components/MessageList.jsx`:
+  - render the synthetic new-chat `Connected. Type your question to start.` placeholder as direct plain text instead of routing it through `RichBlock`
+- Updated `frontend-react/src/main.jsx`:
+  - start markdown parser warmup after initial render on an idle path
+
+### Tests
+
+- Updated `frontend-react/src/__tests__/RichBlock.test.jsx` with cold-start and markdown-load-failure coverage
+- Updated `frontend-react/src/__tests__/MessageList.test.jsx` with immediate new-chat placeholder rendering coverage
+- Updated `frontend-react/src/__tests__/markdown.test.js` to reset markdown singleton state per test
+- Updated `frontend-react/src/__tests__/App.behavior.test.jsx` to assert the new-chat placeholder is visible immediately after switching
+
+### Docs
+
+- Updated `docs/assistant/architecture-rules.md`
+- Updated `README.md`
+
 ## 2026-03-10 (Agent Clarification Interrupts - Phase A, UI polish)
 
 ### UI Polish & Bug Fixes (post-review)
@@ -12,14 +92,14 @@ All notable changes to this repository are documented in this file.
 - **Frontend**: Added inline free-text input inside the clarification card when `allowFreeText` is true
 - **Frontend**: Clarification cards now transition to "Answered" state (dimmed, non-interactive) when the user submits their response
 - **Frontend**: Answer section hidden when a clarification card is active (no more duplicate question text)
-- **Frontend**: `canSubmitClarification` now scoped to the active session instead of blocking across all sessions
+- **Frontend**: Clarification replies continue to follow the global single in-flight policy; if another session is running, clarification submit stays disabled until that run stops
 - **Frontend**: Added responsive stacking for option buttons on mobile, keyboard focus-visible ring, and ARIA attributes
 
 ## 2026-03-10 (Agent Clarification Interrupts - Phase A, initial)
 
 ### Summary
 
-Implemented Codex-style clarification interrupts for agent-capable models. The agent can now ask the user a structured follow-up question through `request_user_input`, the backend emits `user_input_required`, and the frontend unlocks the session so the next reply continues as a normal follow-up turn.
+Implemented Codex-style clarification interrupts for agent-capable models. The agent can now ask the user a structured follow-up question through `request_user_input`, the backend emits `user_input_required`, and the frontend lets the next reply continue as a normal follow-up turn once the global single in-flight lock is clear.
 
 ### Backend
 

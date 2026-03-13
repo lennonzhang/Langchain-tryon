@@ -21,6 +21,11 @@ class TestGatewayApp(unittest.TestCase):
         self._api_key_patcher.start()
         self.addCleanup(self._api_key_patcher.stop)
 
+    def _first_asset_name(self) -> str:
+        assets_dir = gateway_app_module.FRONTEND_DIST_DIR / "assets"
+        asset = next(path for path in assets_dir.iterdir() if path.is_file())
+        return asset.name
+
     def test_capabilities_route(self):
         response = self.client.get("/api/capabilities")
         self.assertEqual(response.status_code, 200)
@@ -133,6 +138,7 @@ class TestGatewayApp(unittest.TestCase):
             response = self.client.post("/api/chat/stream", json=payload)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "text/event-stream; charset=utf-8")
+        self.assertEqual(response.headers["cache-control"], "no-cache, no-transform")
         body = response.text
         self.assertIn('"type": "error"', body)
         self.assertIn('"error": "gateway queue is full"', body)
@@ -146,12 +152,28 @@ class TestGatewayApp(unittest.TestCase):
             gate.acquire = AsyncMock(side_effect=QueueTimeoutError("gateway queue timeout"))
             response = self.client.post("/api/chat/stream", json=payload)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-cache, no-transform")
         body = response.text
         self.assertIn('"type": "error"', body)
         self.assertIn('"error": "gateway queue timeout"', body)
         self.assertIn('"type": "done"', body)
         self.assertIn('"finish_reason": "error"', body)
         self.assertIn('"request_id": "rid-stream-queue-timeout"', body)
+
+    def test_chat_stream_success_uses_streaming_safe_cache_control(self):
+        payload = {"message": "hello", "request_id": "rid-stream-success"}
+        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
+            gate.acquire = AsyncMock(return_value=None)
+            gate.release = AsyncMock(return_value=None)
+            with patch(
+                "backend.gateway.app.stream_chat",
+                return_value=iter([{"type": "done", "finish_reason": "stop"}]),
+            ):
+                response = self.client.post("/api/chat/stream", json=payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "text/event-stream; charset=utf-8")
+        self.assertEqual(response.headers["cache-control"], "no-cache, no-transform")
+        self.assertIn('"finish_reason": "stop"', response.text)
 
     def test_chat_stream_duplicate_request_id_emits_error_and_done(self):
         payload = {"message": "hello", "request_id": "rid-stream-duplicate"}
@@ -240,6 +262,23 @@ class TestGatewayApp(unittest.TestCase):
             response = self.client.get("/..%2FREADME.md")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"error": "Forbidden"})
+
+    def test_frontend_root_serves_index_with_no_cache(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-cache")
+        self.assertIn("text/html", response.headers["content-type"])
+
+    def test_frontend_spa_fallback_serves_index_with_no_cache(self):
+        response = self.client.get("/chat")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-cache")
+        self.assertIn("text/html", response.headers["content-type"])
+
+    def test_frontend_assets_are_served_with_immutable_cache_control(self):
+        response = self.client.get(f"/assets/{self._first_asset_name()}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "public, max-age=31536000, immutable")
 
     def test_cancel_route_stays_available_while_shutdown_requested(self):
         app.state.shutdown_requested = True

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetMarkdownStateForTests, __setMarkdownLoaderForTests } from "../utils/markdown";
 
 const ensurePrismLoadedMock = vi.hoisted(() => vi.fn());
 
@@ -13,6 +14,7 @@ describe("RichBlock", () => {
   let writeTextMock;
 
   beforeEach(() => {
+    __resetMarkdownStateForTests();
     ensurePrismLoadedMock.mockReset();
     ensurePrismLoadedMock.mockResolvedValue(undefined);
     writeTextMock = vi.fn().mockResolvedValue(undefined);
@@ -25,17 +27,41 @@ describe("RichBlock", () => {
   afterEach(() => {
     vi.useRealTimers();
     delete window.Prism;
+    __resetMarkdownStateForTests();
   });
 
-  it("renders copy button for fenced code blocks", () => {
+  it("renders plain text immediately before markdown finishes loading", () => {
+    render(<RichBlock className="assistant-body" text="**cold start**" />);
+
+    expect(screen.getByText("**cold start**")).toBeInTheDocument();
+  });
+
+  it("keeps plain text visible if markdown loading fails", async () => {
+    __setMarkdownLoaderForTests(() => Promise.reject(new Error("chunk failed")));
+
+    const { container } = render(<RichBlock className="assistant-body" text="**still visible**" />);
+
+    expect(screen.getByText("**still visible**")).toBeInTheDocument();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("**still visible**")).toBeInTheDocument();
+    expect(container.querySelector("strong")).toBeNull();
+  });
+
+  it("renders copy button for fenced code blocks after markdown loads", async () => {
     render(<RichBlock className="assistant-body" text={"```js\nconst x = 1;\n```"} />);
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Copy" })).toBeInTheDocument();
   });
 
   it("copies code via delegated handler and resets button text", async () => {
-    vi.useFakeTimers();
     render(<RichBlock className="assistant-body" text={"```js\nconst x = 1;\n```"} />);
-    const button = screen.getByRole("button", { name: "Copy" });
+    const button = await screen.findByRole("button", { name: "Copy" });
+
+    // Switch to fake timers after async rendering completes
+    vi.useFakeTimers();
 
     await act(async () => {
       fireEvent.click(button);

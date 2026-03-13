@@ -3,6 +3,17 @@
   "installCommand": "cd frontend-react && npx -y pnpm@10.0.0 install --frozen-lockfile",
   "buildCommand": "cd frontend-react && npx -y pnpm@10.0.0 run build",
   "outputDirectory": "frontend/dist",
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/capabilities",

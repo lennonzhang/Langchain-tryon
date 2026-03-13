@@ -141,14 +141,17 @@ Open `http://127.0.0.1:8000`.
 - Agent-capable models can interrupt a run with a structured clarification question:
   - the stream emits `user_input_required` (question + up to 3 options + optional free-text), then `done(finish_reason="user_input_required")`
   - the clarification card uses a violet accent theme with option buttons and an inline free-text input (when `allow_free_text` is true)
-  - the previous clarification card transitions to a dimmed "Answered" state when the user submits a reply; submit is session-scoped (not blocked by other sessions streaming)
+  - the previous clarification card transitions to a dimmed "Answered" state when the user submits a reply
+  - clarification replies follow the same global single in-flight rule as normal sends; if another session is already generating, submit stays blocked until that run stops
   - a `ToolMessage` is appended to agent state so the tool_call/result pair stays valid for future resumption
-- Markdown code blocks provide copy actions and syntax highlighting (highlighting runs after stream completion).
+- Assistant text stays visible as plain text during cold-start markdown loading; markdown code blocks then upgrade with copy actions and syntax highlighting after parsing is ready (highlighting still runs after stream completion).
 - `New chat` enters a draft-only view (no immediate session creation).
 - Switching from unsent draft to an existing session preserves draft text; first send from draft creates a real session and clears draft.
 - Composer send button switches to `Stop` while the active session is streaming; when another session is streaming, send remains disabled.
 - `Stop` first calls `POST /api/chat/cancel`, then aborts the local SSE request so backend cancellation can start immediately.
 - Local `python server.py` shutdown uses the same backend cancellation path for active streaming requests before exit.
+- Local static frontend delivery keeps `index.html` and SPA fallbacks on `Cache-Control: no-cache`, while hashed `/assets/*` files are served with `Cache-Control: public, max-age=31536000, immutable`.
+- SSE responses send `Cache-Control: no-cache, no-transform` so intermediaries do not rewrite streaming payloads.
 - If the capabilities payload contains no selectable models, the model selector stays visible but is disabled and shows `No models available`.
 - `context_usage` is emitted at start and refreshed with a terminal `phase=final` update before `done`.
 - Session sidebar keeps a stable responsive width on desktop/tablet and no longer resizes with long session content.
@@ -293,3 +296,4 @@ Deployment:
 - User must explicitly stop the running session to unlock new sends; terminal handling is idempotent (first terminal signal wins).
 - SSE parser is CRLF/LF tolerant.
 - Current persistence default is in-memory repository (`MemorySessionRepository`), with pluggable repository interface for IndexedDB or backend sync later.
+- Conversation history is page-lifetime only right now: a full refresh or closing the tab clears locally stored sessions in both local and Vercel deployments.

@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { toSafeHtml } from "../utils/markdown";
+import { beforeEach, describe, expect, it } from "vitest";
+import { __resetMarkdownStateForTests, ensureMarkdownLoaded, toSafeHtml } from "../utils/markdown";
+
+beforeEach(async () => {
+  __resetMarkdownStateForTests();
+  await ensureMarkdownLoaded();
+});
 
 describe("toSafeHtml code rendering", () => {
   it("wraps fenced code with chrome wrapper and copy button", () => {
