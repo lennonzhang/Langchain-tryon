@@ -15,7 +15,8 @@
 - Non-NVIDIA provider logic belongs in `ProxyGatewayChatModel` path, not in `nvidia_client.py`.
 - All providers must implement real SSE streaming.
 - Application-layer search orchestration belongs in `SearchService`; `SearchProvider` remains the shared event-emission adapter underneath.
-- Web page loading uses `httpx.AsyncClient` (async concurrent) + `trafilatura` (text extraction); `requests`+`bs4` is the fallback. Do not reintroduce `WebBaseLoader`.
+- Search is Tavily-first via direct REST integration in `backend/web_search.py`; `SEARCH_BACKEND=legacy` is a temporary fallback to the deprecated DuckDuckGo + local page loader path.
+- Tool surface must stay stable while the backend migrates: keep `web_search` and `read_url` as the public tool names even though their default implementations now use Tavily Search and Tavily Extract.
 - Do not rename SSE events silently.
 - Gateway admission is centralized in `backend/gateway/admission.py`; do not re-implement queueing or throttling in facade code.
 - Static frontend serving must remain rooted under the frontend dist directory; preserve path traversal protection when changing gateway routes.

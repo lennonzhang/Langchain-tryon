@@ -2,6 +2,37 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-16 (Tavily-First Search Migration)
+
+### Summary
+
+Moved search and page-reading defaults to Tavily while preserving the existing SSE contract, direct-chat search-context injection flow, tool names, and frontend session/draft semantics.
+
+### Backend
+
+- Added `backend/infrastructure/search/tavily_client.py` for direct Tavily REST integration, env resolution, result normalization, and timeout handling
+- Updated `backend/web_search.py`:
+  - default runtime path is now Tavily Search + Tavily Extract
+  - `SEARCH_BACKEND=legacy` temporarily restores the deprecated DuckDuckGo + local loader path
+  - rewrote `format_search_context()` to a compact citation-friendly format with numbered `[N]` references
+- Updated `backend/nvidia_client.py`:
+  - kept `_run_web_search()` signature stable
+  - added Tavily env precedence with legacy timeout/env fallback compatibility
+- Kept tool names stable:
+  - `web_search` still exposes search to the agent, but now defaults to Tavily Search + compact formatter context
+  - `read_url` still exposes page reading to the agent, but now defaults to Tavily Extract
+
+### Tests
+
+- Rewrote `tests/test_web_search.py` for Tavily-first behavior and legacy fallback coverage
+- Added `tests/test_tavily_client.py` for Tavily env resolution, normalization, and timeout handling
+- Updated `tests/test_nvidia_client.py` for Tavily env precedence
+
+### Docs
+
+- Updated `AGENTS.md`, `CLAUDE.md`, `README.md`, `.env.example`
+- Updated `docs/assistant/architecture-rules.md`, `docs/assistant/runtime-and-commands.md`, `docs/assistant/path-index.md`
+
 ## 2026-03-13 (Model Catalog Env Bootstrap)
 
 ### Summary

@@ -94,6 +94,34 @@ class TestNvidiaClient(unittest.TestCase):
             concurrency=6,
         )
 
+    def test_run_web_search_prefers_tavily_envs(self):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "TAVILY_TIMEOUT_SECONDS": "8.5",
+                    "TAVILY_MAX_EXTRACT_RESULTS": "2",
+                    "WEB_LOADER_TIMEOUT_SECONDS": "2.5",
+                    "WEB_SEARCH_TOTAL_BUDGET_SECONDS": "5.5",
+                    "WEB_LOADER_MAX_PAGES": "4",
+                },
+                clear=False,
+            ),
+            patch("backend.web_search.web_search", return_value=[]) as web_search_mock,
+            patch("backend.web_search.format_search_context", return_value=""),
+        ):
+            _run_web_search("question")
+
+        web_search_mock.assert_called_once_with(
+            "question",
+            num_results=5,
+            include_page_content=True,
+            page_timeout_s=8.5,
+            total_budget_s=8.5,
+            max_pages=2,
+            concurrency=None,
+        )
+
     def test_build_chat_model_zai_thinking_on(self):
         fake_module = types.ModuleType("langchain_nvidia_ai_endpoints")
         chat_cls = unittest.mock.Mock()
@@ -272,6 +300,30 @@ class TestNvidiaClient(unittest.TestCase):
         )
         self.assertEqual(fake_client.invoke_kwargs["max_completion_tokens"], output_tokens())
         self.assertEqual(fake_client.invoke_kwargs["chat_template_kwargs"], {"thinking": False})
+
+    def test_chat_once_legacy_search_backend_injects_legacy_context(self):
+        fake_client = FakeClient(invoke_content="legacy answer")
+        with (
+            patch.dict(os.environ, {"SEARCH_BACKEND": "legacy"}, clear=False),
+            patch("backend.nvidia_client.resolve_model", return_value="moonshotai/kimi-k2.5"),
+            patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
+            patch(
+                "backend.web_search._legacy_web_search",
+                return_value=[{"title": "Legacy", "url": "https://legacy.example", "snippet": "legacy snippet"}],
+            ),
+        ):
+            answer = chat_once(
+                "api-key",
+                "legacy question",
+                [],
+                enable_search=True,
+                thinking_mode=False,
+            )
+
+        self.assertEqual(answer, "legacy answer")
+        self.assertEqual(fake_client.invoked_messages[0]["role"], "system")
+        self.assertIn('search results for "legacy question"', fake_client.invoked_messages[0]["content"])
+        self.assertNotIn("Tavily results", fake_client.invoked_messages[0]["content"])
 
     def test_chat_once_kimi_search_keeps_non_agentic_injection(self):
         fake_client = FakeClient(invoke_content="ok")
@@ -475,6 +527,35 @@ class TestNvidiaClient(unittest.TestCase):
 
         self.assertEqual(events[0]["type"], "search_start")
         self.assertEqual(events[1]["type"], "search_error")
+        self.assertIn({"type": "token", "content": "token-ok"}, events)
+        self.assertEqual(events[-1]["type"], "done")
+
+    def test_stream_chat_missing_tavily_api_key_emits_search_error_and_continues(self):
+        chunks = [SimpleNamespace(content="token-ok", additional_kwargs={})]
+        fake_client = FakeClient(chunks=chunks)
+
+        with (
+            patch.dict(os.environ, {"SEARCH_BACKEND": "tavily", "TAVILY_API_KEY": ""}, clear=False),
+            patch("backend.nvidia_client.resolve_model", return_value="moonshotai/kimi-k2.5"),
+            patch("backend.nvidia_client._build_chat_model", return_value=fake_client),
+            patch(
+                "backend.web_search.TavilyClient",
+                side_effect=RuntimeError("Missing TAVILY_API_KEY for SEARCH_BACKEND=tavily."),
+            ),
+        ):
+            events = list(
+                stream_chat(
+                    "api-key",
+                    "question",
+                    [],
+                    enable_search=True,
+                    request_id="rid-stream-search-missing-tavily-key",
+                )
+            )
+
+        self.assertEqual(events[0]["type"], "search_start")
+        self.assertEqual(events[1]["type"], "search_error")
+        self.assertIn("Missing TAVILY_API_KEY", events[1]["error"])
         self.assertIn({"type": "token", "content": "token-ok"}, events)
         self.assertEqual(events[-1]["type"], "done")
 

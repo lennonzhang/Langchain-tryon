@@ -22,11 +22,14 @@
 - Shared model timeout env: `MODEL_TIMEOUT_SECONDS`
 - Provider timeout envs: `<PROVIDER>_TIMEOUT_SECONDS`
 - OpenAI SSE read-idle timeout env: `OPENAI_SSE_READ_TIMEOUT_SECONDS` (default `600`)
-- Web loader per-page read timeout env: `WEB_LOADER_TIMEOUT_SECONDS` (default `10`)
-- Web loader connect timeout env: `WEB_LOADER_CONNECT_TIMEOUT` (default `5`)
-- Web search total budget env: `WEB_SEARCH_TOTAL_BUDGET_SECONDS` (default `15`)
-- Web loader max pages env: `WEB_LOADER_MAX_PAGES` (default `3`)
-- Web loader concurrency env: `WEB_LOADER_CONCURRENCY` (default `3`)
+- Search backend env: `SEARCH_BACKEND` (default `tavily`, `legacy` for deprecated fallback)
+- Tavily API key env: `TAVILY_API_KEY`
+- Tavily base URL env: `TAVILY_BASE_URL` (default `https://api.tavily.com`)
+- Tavily timeout env: `TAVILY_TIMEOUT_SECONDS` (default `15`)
+- Tavily search depth env: `TAVILY_SEARCH_DEPTH` (default `basic`)
+- Tavily extract depth env: `TAVILY_EXTRACT_DEPTH` (default `advanced`)
+- Tavily extract result limit env: `TAVILY_MAX_EXTRACT_RESULTS` (default `3`)
+- Legacy search env fallbacks remain accepted during migration: `WEB_LOADER_TIMEOUT_SECONDS`, `WEB_SEARCH_TOTAL_BUDGET_SECONDS`, `WEB_LOADER_MAX_PAGES`, `WEB_LOADER_CONCURRENCY`
 - Local shutdown drain env: `SHUTDOWN_CANCEL_DRAIN_SECONDS` (default `2`)
 - `thinking_mode` default: `true`
 - Auto `agent_mode` when omitted:
@@ -40,6 +43,13 @@
 python server.py
 python -m unittest discover -s tests -v
 ```
+
+Search backend notes:
+
+- default runtime path is Tavily Search + Tavily Extract
+- `SEARCH_BACKEND=legacy` temporarily restores the deprecated DuckDuckGo + local page loader path
+- `web_search` / `read_url` tool names and SSE search events remain unchanged across both paths
+- `WEB_LOADER_CONCURRENCY` remains a legacy compatibility knob; Tavily-backed search ignores it
 
 Local `python server.py` shutdown behavior:
 

@@ -48,9 +48,10 @@ pnpm test:e2e
   - verify `python server.py` is using the graceful shutdown path and check `SHUTDOWN_CANCEL_DRAIN_SECONDS`
 - Cross-session stream bleed:
   - verify frontend isolation by `sessionId + requestId`
-- Web page loading timeout/failure:
-  - check `WEB_LOADER_TIMEOUT_SECONDS` (default `10`), `WEB_SEARCH_TOTAL_BUDGET_SECONDS` (default `15`)
-  - web loading uses httpx async + trafilatura; requests+bs4 is the fallback path
+- Web search timeout/failure:
+  - check `SEARCH_BACKEND` and confirm Tavily is the active path by default
+  - check `TAVILY_TIMEOUT_SECONDS` first, then legacy timeout fallbacks (`WEB_SEARCH_TOTAL_BUDGET_SECONDS`, `WEB_LOADER_TIMEOUT_SECONDS`)
+  - `web_search` and `read_url` keep the same tool names; they route to Tavily Search and Tavily Extract unless `SEARCH_BACKEND=legacy`
 
 ## Quick Navigation (Progressive Disclosure)
 

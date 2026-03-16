@@ -1,4 +1,4 @@
-"""Web search via DuckDuckGo for context injection."""
+"""Web search via Tavily-first with a temporary legacy fallback."""
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -6,9 +6,12 @@ import logging
 import os
 import re
 import warnings
+from urllib.parse import urlparse
 
 import httpx
 import requests
+
+from backend.infrastructure.search.tavily_client import TavilyClient, resolve_search_backend, resolve_tavily_settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,10 @@ _DEFAULT_WEB_SEARCH_TOTAL_BUDGET_SECONDS = 15.0
 _DEFAULT_WEB_LOADER_CONNECT_TIMEOUT = 5.0
 _DEFAULT_WEB_LOADER_MAX_PAGES = 3
 _DEFAULT_WEB_LOADER_CONCURRENCY = 3
+_DEFAULT_MAX_FORMAT_RESULTS = 5
+_MAX_SNIPPET_CHARS = 240
+_MAX_CONTENT_CHARS = 600
+_MAX_CONTEXT_CHARS = 3200
 
 _BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -52,6 +59,36 @@ def _normalize_text(value: str, max_chars: int) -> str:
     if max_chars <= 0:
         return text
     return text[:max_chars]
+
+
+def _resolved_timeout(page_timeout_s: float | None = None, total_budget_s: float | None = None) -> float:
+    if total_budget_s is not None and total_budget_s > 0:
+        return total_budget_s
+    if page_timeout_s is not None and page_timeout_s > 0:
+        return page_timeout_s
+    return resolve_tavily_settings().timeout_seconds
+
+
+def _resolved_extract_limit(max_pages: int | None = None) -> int:
+    if max_pages is not None:
+        return max(0, min(int(max_pages), 20))
+    return resolve_tavily_settings().max_extract_results
+
+
+def _resolved_load_timeout(timeout_s: float | None = None) -> float:
+    if timeout_s is not None and timeout_s > 0:
+        return timeout_s
+    if resolve_search_backend() == "legacy":
+        return _float_env(
+            "WEB_LOADER_TIMEOUT_SECONDS",
+            _DEFAULT_WEB_LOADER_TIMEOUT_SECONDS,
+            0.1,
+        )
+    return resolve_tavily_settings().timeout_seconds
+
+
+def _source_domain(url: str) -> str:
+    return urlparse((url or "").strip()).netloc.lower()
 
 
 def _extract_with_bs4(html: str, max_chars: int) -> str:
@@ -198,7 +235,7 @@ def _load_pages_sync(
 # Public API (signatures unchanged)
 # ---------------------------------------------------------------------------
 
-def load_webpage_content(url: str, max_chars: int = 1800, timeout_s: float = 10.0) -> str:
+def _legacy_load_webpage_content(url: str, max_chars: int = 1800, timeout_s: float = 10.0) -> str:
     """Load and trim webpage text content. Drop-in replacement for the old WebBaseLoader path."""
     try:
         result = _load_pages_sync(
@@ -218,7 +255,7 @@ def load_webpage_content(url: str, max_chars: int = 1800, timeout_s: float = 10.
     return _fetch_with_requests(url, max_chars=max_chars, timeout=timeout_s)
 
 
-def web_search(
+def _legacy_web_search(
     query: str,
     num_results: int = 5,
     include_page_content: bool = True,
@@ -308,28 +345,118 @@ def web_search(
         return []
 
 
+def load_webpage_content(url: str, max_chars: int = 1800, timeout_s: float | None = None) -> str:
+    resolved_timeout = _resolved_load_timeout(timeout_s)
+    if resolve_search_backend() == "legacy":
+        return _legacy_load_webpage_content(url, max_chars=max_chars, timeout_s=resolved_timeout)
+
+    client = TavilyClient()
+    extracted = client.extract([url], timeout_seconds=resolved_timeout)
+    return _normalize_text(extracted.get(url, ""), max_chars=max_chars)
+
+
+def web_search(
+    query: str,
+    num_results: int = 5,
+    include_page_content: bool = True,
+    page_timeout_s: float | None = None,
+    total_budget_s: float | None = None,
+    max_pages: int | None = None,
+    concurrency: int | None = None,
+) -> list[dict]:
+    if resolve_search_backend() == "legacy":
+        return _legacy_web_search(
+            query,
+            num_results=num_results,
+            include_page_content=include_page_content,
+            page_timeout_s=page_timeout_s,
+            total_budget_s=total_budget_s,
+            max_pages=max_pages,
+            concurrency=concurrency,
+        )
+
+    _ = concurrency  # Deprecated compatibility knob; Tavily paths do not use local fetch concurrency.
+    timeout_s = _resolved_timeout(page_timeout_s=page_timeout_s, total_budget_s=total_budget_s)
+    extract_limit = _resolved_extract_limit(max_pages=max_pages)
+
+    client = TavilyClient()
+    results = client.search(query, max_results=num_results, timeout_seconds=timeout_s)
+    normalized_results = [
+        {
+            "title": _normalize_text(item.get("title", ""), 200),
+            "url": str(item.get("url") or "").strip(),
+            "snippet": _normalize_text(item.get("snippet", ""), 1200),
+            "source_domain": item.get("source_domain") or _source_domain(item.get("url", "")),
+            **({"score": item["score"]} if "score" in item else {}),
+            **({"published_date": item["published_date"]} if "published_date" in item else {}),
+        }
+        for item in results
+    ]
+
+    if not include_page_content or extract_limit <= 0:
+        return normalized_results
+
+    ordered_urls: list[str] = []
+    for item in normalized_results:
+        url = item.get("url", "")
+        if not url or url in ordered_urls:
+            continue
+        ordered_urls.append(url)
+        if len(ordered_urls) >= extract_limit:
+            break
+
+    if not ordered_urls:
+        return normalized_results
+
+    try:
+        extracted = client.extract(ordered_urls, timeout_seconds=timeout_s)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Tavily extract failed, returning search-only results: %s", exc)
+        return normalized_results
+
+    for item in normalized_results:
+        url = item.get("url", "")
+        content = extracted.get(url, "")
+        if content:
+            item["content"] = _normalize_text(content, max_chars=1800)
+    return normalized_results
+
+
 def format_search_context(query: str, results: list[dict]) -> str:
-    """Format search results into a system message for LLM context injection."""
+    """Format search results into a compact citation-friendly system context."""
     if not results:
         return ""
 
-    lines = [f'The user enabled web search. Here are search results for "{query}":\n']
-    for i, r in enumerate(results, 1):
-        entry = f"[{i}] {r.get('title', '')}"
-        url = r.get("url", "")
-        if url:
-            entry += f"\n    URL: {url}"
-        snippet = r.get("snippet", "")
-        if snippet:
-            entry += f"\n    {snippet}"
-        content = r.get("content", "")
-        if content:
-            entry += f"\n    Page content: {content}"
-        lines.append(entry)
+    lines = [f'The user enabled web search. Here are search results for "{query}":', ""]
+    context = "\n".join(lines)
 
-    lines.append(
-        "\nUse the above search results to inform your answer. "
-        "Cite sources with [N] notation when referencing specific results. "
-        "If the search results are not relevant, you may ignore them."
+    for i, result in enumerate(results[:_DEFAULT_MAX_FORMAT_RESULTS], 1):
+        title = _normalize_text(str(result.get("title") or f"Result {i}"), 160)
+        url = str(result.get("url") or "").strip()
+        source_domain = _normalize_text(str(result.get("source_domain") or _source_domain(url) or "unknown"), 80)
+        snippet = _normalize_text(str(result.get("snippet") or ""), _MAX_SNIPPET_CHARS)
+        content = _normalize_text(str(result.get("content") or ""), _MAX_CONTENT_CHARS)
+
+        entry_lines = [f"[{i}] {title}"]
+        if source_domain:
+            entry_lines.append(f"    Source: {source_domain}")
+        if url:
+            entry_lines.append(f"    URL: {url}")
+        if snippet:
+            entry_lines.append(f"    Summary: {snippet}")
+        if content:
+            entry_lines.append(f"    Evidence: {content}")
+
+        candidate = context + "\n".join(entry_lines) + "\n\n"
+        if len(candidate) > _MAX_CONTEXT_CHARS:
+            break
+        context = candidate
+
+    suffix = (
+        "Use the search results above to answer the question when relevant. "
+        "When you cite a specific result, cite it with [N]. "
+        "If the results are not relevant, you may ignore them."
     )
-    return "\n".join(lines)
+    if len(context) + len(suffix) > _MAX_CONTEXT_CHARS:
+        context = context[: _MAX_CONTEXT_CHARS - len(suffix) - 1].rstrip() + "\n"
+    return context + suffix

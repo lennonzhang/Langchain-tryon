@@ -23,10 +23,11 @@
 - Agent session builder: `backend/application/agent_session_builder.py`
 - Chat use cases + cancellation flow: `backend/application/chat_use_cases.py`, `backend/domain/execution.py`
 - Direct/agent streaming event generation: `backend/event_mapper.py`
-- Web page loading (httpx async + trafilatura) and DuckDuckGo search: `backend/web_search.py`
+- Tavily-first search facade + compact search-context formatter with temporary legacy fallback: `backend/web_search.py`
+- Tavily REST client and search settings resolution: `backend/infrastructure/search/tavily_client.py`
 - Shared search event emission adapter: `backend/search_provider.py`
 - Search service orchestration used by chat use cases: `backend/application/search_service.py`
-- LangChain tools (web_search, read_url, python_exec): `backend/tools_registry.py`
+- LangChain tools (`web_search`/`read_url` names unchanged; default implementations now use Tavily): `backend/tools_registry.py`
 - Request schema parsing (`ChatRequest`): `backend/schemas.py`
 - `/api/chat` and `/api/chat/stream` compatibility handlers: `backend/chat_handlers.py`
 - FastAPI gateway routes: `backend/gateway/app.py`

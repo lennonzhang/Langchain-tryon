@@ -31,6 +31,13 @@ NVIDIA_API_KEY=nvapi-your-key
 PORT=8000
 NVIDIA_USE_SYSTEM_PROXY=0
 USER_AGENT=langchain-tryon/1.0
+SEARCH_BACKEND=tavily
+TAVILY_API_KEY=tvly-your-key
+TAVILY_BASE_URL=https://api.tavily.com
+TAVILY_TIMEOUT_SECONDS=15
+TAVILY_SEARCH_DEPTH=basic
+TAVILY_EXTRACT_DEPTH=advanced
+TAVILY_MAX_EXTRACT_RESULTS=3
 WEB_LOADER_TIMEOUT_SECONDS=2.0
 WEB_SEARCH_TOTAL_BUDGET_SECONDS=4.0
 WEB_LOADER_MAX_PAGES=3
@@ -137,6 +144,11 @@ Open `http://127.0.0.1:8000`.
 - Stream/upstream error diagnostics use normalized provider detail (`provider`, `protocol`, `type`, optional `status`, `message`); SSE error frames preserve upstream `error.type` when available.
 - Media input: kimi only
 - Search events and reasoning/token streams are shown in dedicated sections.
+- Search is Tavily-first by default:
+  - `SEARCH_BACKEND=tavily` uses Tavily Search plus Tavily Extract
+  - `SEARCH_BACKEND=legacy` temporarily restores the deprecated DuckDuckGo + local page-loader path for rollback/debugging
+  - `web_search` and `read_url` keep their existing tool names; only the default backend implementation changed
+- Direct chat still injects formatted search context into the first `system` message when `web_search=true`; the formatter is now compact and citation-friendly (`[N]` style)
 - Agent reasoning is formatted into readable paragraphs using step-boundary and text heuristics during streaming.
 - Agent-capable models can interrupt a run with a structured clarification question:
   - the stream emits `user_input_required` (question + up to 3 options + optional free-text), then `done(finish_reason="user_input_required")`
@@ -297,3 +309,4 @@ Deployment:
 - SSE parser is CRLF/LF tolerant.
 - Current persistence default is in-memory repository (`MemorySessionRepository`), with pluggable repository interface for IndexedDB or backend sync later.
 - Conversation history is page-lifetime only right now: a full refresh or closing the tab clears locally stored sessions in both local and Vercel deployments.
+- This Tavily migration does not change the frontend session/draft persistence semantics above.

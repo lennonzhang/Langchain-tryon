@@ -69,7 +69,11 @@ def _build_web_search_tool(search_provider):
 
     @tool("web_search")
     def web_search_tool(query: str) -> str:
-        """Search the web for up-to-date information."""
+        """Search the web for up-to-date information.
+
+        The tool name remains stable for model/tool-call compatibility.
+        Its default backend implementation now routes through Tavily.
+        """
         context, _results = search_provider.search_with_events(query)
         return context or "No useful search results."
 
@@ -85,10 +89,16 @@ def _build_read_url_tool():
 
         Use this tool when you need to read the full content of a page
         found via web_search, or any URL provided by the user.
+        The tool name remains stable while the default backend now uses
+        Tavily Extract, with an optional legacy fallback path.
         """
         from .web_search import load_webpage_content
 
-        content = load_webpage_content(url, max_chars=4000)
+        try:
+            content = load_webpage_content(url, max_chars=4000)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("read_url failed for %s: %s", url, exc)
+            return "Could not load page content."
         return content or "Could not load page content."
 
     return read_url_tool

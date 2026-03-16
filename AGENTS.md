@@ -14,7 +14,8 @@ Repository-level entry guide for coding agents.
 - All providers must implement real SSE streaming (no fake full-response streaming).
 - Do not silently rename SSE event names.
 - Error flow invariant is mandatory: `error` must be followed by `done` with `finish_reason: "error"`.
-- Web page loading uses `httpx.AsyncClient` + `trafilatura`; `requests`+`bs4` is the fallback. Do not reintroduce `WebBaseLoader`.
+- Search defaults to Tavily via direct REST integration in `backend/web_search.py`; `SEARCH_BACKEND=legacy` temporarily re-enables the deprecated DuckDuckGo + local loader path.
+- Existing tool names stay stable: `web_search` now means Tavily Search + compact formatter context by default, and `read_url` now means Tavily Extract by default.
 - Update tests and documentation together for behavior changes.
 
 ## Quick Navigation (Progressive Disclosure)

@@ -59,6 +59,13 @@ class TestToolsRegistry(unittest.TestCase):
             result = read_url.invoke("https://example.com")
         self.assertIn("Could not load", result)
 
+    def test_read_url_tool_returns_fallback_on_exception(self):
+        tools = build_agent_tools(search_provider=None)
+        read_url = next(t for t in tools if t.name == "read_url")
+        with patch("backend.web_search.load_webpage_content", side_effect=RuntimeError("missing key")):
+            result = read_url.invoke("https://example.com")
+        self.assertIn("Could not load", result)
+
     def test_python_exec_disabled_by_default(self):
         tools = build_agent_tools(search_provider=None)
         names = [t.name for t in tools]

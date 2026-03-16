@@ -57,41 +57,53 @@ def _run_web_search(
 ):
     from .web_search import format_search_context, web_search
 
+    def _float_from_env(*names: str) -> float | None:
+        for name in names:
+            raw = os.getenv(name, "").strip()
+            if not raw:
+                continue
+            try:
+                return float(raw)
+            except ValueError:
+                continue
+        return None
+
+    def _int_from_env(*names: str) -> int | None:
+        for name in names:
+            raw = os.getenv(name, "").strip()
+            if not raw:
+                continue
+            try:
+                return int(raw)
+            except ValueError:
+                continue
+        return None
+
     resolved_page_timeout = page_timeout_s
     if resolved_page_timeout is None:
-        raw = os.getenv("WEB_LOADER_TIMEOUT_SECONDS", "").strip()
-        if raw:
-            try:
-                resolved_page_timeout = float(raw)
-            except ValueError:
-                resolved_page_timeout = None
+        resolved_page_timeout = _float_from_env(
+            "TAVILY_TIMEOUT_SECONDS",
+            "WEB_LOADER_TIMEOUT_SECONDS",
+        )
 
     resolved_total_budget = total_budget_s
     if resolved_total_budget is None:
-        raw = os.getenv("WEB_SEARCH_TOTAL_BUDGET_SECONDS", "").strip()
-        if raw:
-            try:
-                resolved_total_budget = float(raw)
-            except ValueError:
-                resolved_total_budget = None
+        resolved_total_budget = _float_from_env(
+            "TAVILY_TIMEOUT_SECONDS",
+            "WEB_SEARCH_TOTAL_BUDGET_SECONDS",
+            "WEB_LOADER_TIMEOUT_SECONDS",
+        )
 
     resolved_max_pages = max_pages
     if resolved_max_pages is None:
-        raw = os.getenv("WEB_LOADER_MAX_PAGES", "").strip()
-        if raw:
-            try:
-                resolved_max_pages = int(raw)
-            except ValueError:
-                resolved_max_pages = None
+        resolved_max_pages = _int_from_env(
+            "TAVILY_MAX_EXTRACT_RESULTS",
+            "WEB_LOADER_MAX_PAGES",
+        )
 
     resolved_concurrency = concurrency
     if resolved_concurrency is None:
-        raw = os.getenv("WEB_LOADER_CONCURRENCY", "").strip()
-        if raw:
-            try:
-                resolved_concurrency = int(raw)
-            except ValueError:
-                resolved_concurrency = None
+        resolved_concurrency = _int_from_env("WEB_LOADER_CONCURRENCY")
 
     results = web_search(
         message,
