@@ -10,7 +10,7 @@ Builds a ``StateGraph`` that supports:
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Callable, TypedDict
+from typing import Annotated, Any, Callable, TypedDict
 
 from langchain_core.messages import (
     AIMessage,
@@ -24,6 +24,7 @@ from langgraph.graph.message import add_messages
 
 from .message_builder import extract_text, history_as_messages
 from .model_profile import stream_or_invoke_kwargs
+from .tools_registry import normalize_request_user_input_args
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,9 @@ _SYSTEM_PROMPT = (
     "You are a helpful assistant with access to tools. "
     "Use tools when needed to find information or perform tasks. "
     "Answer in the same language as the user's question. "
-    "When you have enough information, respond directly without calling tools."
+    "When you have enough information, respond directly without calling tools. "
+    "If key information is missing and the user's answer would change the result, "
+    "call request_user_input instead of guessing."
 )
 
 _PLAN_PROMPT = (
@@ -75,6 +78,8 @@ class AgentState(TypedDict):
     step_end_emitted: bool
     enable_planning: bool
     enable_reflection: bool
+    pending_user_input: dict[str, Any] | None
+    interrupted_for_user_input: bool
 
 
 # ── graph builder ───────────────────────────────────────────────
@@ -173,6 +178,31 @@ def build_agent_graph(
         step = state["step_count"]
         new_messages: list[BaseMessage] = []
 
+        user_input_call = next((tc for tc in tool_calls if tc.get("name") == "request_user_input"), None)
+        if user_input_call is not None:
+            payload = normalize_request_user_input_args(user_input_call.get("args", {}))
+            _emit(
+                {
+                    "type": "user_input_required",
+                    "question": payload["question"],
+                    "options": payload["options"],
+                    "allow_free_text": payload["allow_free_text"],
+                    "step": step,
+                }
+            )
+            _emit({"type": "agent_step_end", "step": step})
+            return {
+                "messages": [
+                    ToolMessage(
+                        content="User input requested.",
+                        tool_call_id=user_input_call["id"],
+                    ),
+                ],
+                "pending_user_input": payload,
+                "interrupted_for_user_input": True,
+                "step_end_emitted": True,
+            }
+
         for tc in tool_calls:
             tool_name = tc["name"]
             tool_args = tc.get("args", {})
@@ -208,6 +238,8 @@ def build_agent_graph(
         return {
             "messages": new_messages,
             "step_end_emitted": True,
+            "pending_user_input": None,
+            "interrupted_for_user_input": False,
         }
 
     def reflect_node(state: AgentState) -> dict:
@@ -264,10 +296,18 @@ def build_agent_graph(
 
     def after_agent(state: AgentState) -> str:
         if state.get("last_had_tool_calls"):
-            if state["step_count"] >= state["max_steps"]:
+            last_msg = state["messages"][-1] if state.get("messages") else None
+            tool_calls = getattr(last_msg, "tool_calls", None) or []
+            has_user_input_tool = any(tc.get("name") == "request_user_input" for tc in tool_calls)
+            if state["step_count"] >= state["max_steps"] and not has_user_input_tool:
                 return "stream_answer"  # Force answer at limit
             return "execute_tools"
         return "stream_answer"
+
+    def after_execute_tools(state: AgentState) -> str:
+        if state.get("interrupted_for_user_input"):
+            return "done"
+        return "reflect"
 
     # ── graph assembly ──────────────────────────────────────
 
@@ -285,7 +325,10 @@ def build_agent_graph(
         "execute_tools": "execute_tools",
         "stream_answer": "stream_answer",
     })
-    graph.add_edge("execute_tools", "reflect")
+    graph.add_conditional_edges("execute_tools", after_execute_tools, {
+        "done": END,
+        "reflect": "reflect",
+    })
     graph.add_edge("reflect", "agent")
     graph.add_edge("stream_answer", END)
 

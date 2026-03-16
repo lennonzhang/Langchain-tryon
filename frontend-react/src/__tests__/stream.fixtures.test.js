@@ -48,12 +48,13 @@ describe("parseEventStream fixtures", () => {
     const reader = new FixtureReader(fixture("stream-error-then-done.txt"));
     const events = [];
 
-    await parseEventStream(reader, (evt) => events.push(evt));
+    const doneEvent = await parseEventStream(reader, (evt) => events.push(evt));
 
     expect(events).toEqual([
       { type: "error", error: "boom" },
       { type: "done", finish_reason: "error" },
     ]);
+    expect(doneEvent).toEqual({ type: "done", finish_reason: "error" });
   });
 
   it("keeps order with async handlers on fixture stream", async () => {

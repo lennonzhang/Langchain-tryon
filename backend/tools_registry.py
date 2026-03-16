@@ -4,9 +4,62 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Callable
+from typing import Any, Callable
+
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+_MAX_USER_INPUT_OPTIONS = 3
+_MAX_QUESTION_LENGTH = 500
+
+
+class ClarificationOption(BaseModel):
+    id: str | None = None
+    label: str
+    description: str | None = None
+
+
+class RequestUserInputArgs(BaseModel):
+    question: str
+    options: list[ClarificationOption] = Field(default_factory=list)
+    allow_free_text: bool = True
+
+
+def normalize_request_user_input_args(args: Any) -> dict[str, Any]:
+    payload = args if isinstance(args, dict) else {}
+    question_raw = str(payload.get("question") or "").strip() or "Please provide the missing information."
+    if len(question_raw) > _MAX_QUESTION_LENGTH:
+        question = question_raw[:_MAX_QUESTION_LENGTH].rsplit(" ", 1)[0] + "\u2026"
+    else:
+        question = question_raw
+
+    normalized_options: list[dict[str, str]] = []
+    raw_options = payload.get("options")
+    if isinstance(raw_options, list):
+        for item in raw_options:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            if not label:
+                continue
+            if len(normalized_options) >= _MAX_USER_INPUT_OPTIONS:
+                logger.warning("Truncated clarification options beyond max %d", _MAX_USER_INPUT_OPTIONS)
+                break
+            option: dict[str, str] = {"label": label}
+            option_id = str(item.get("id") or "").strip()
+            if option_id:
+                option["id"] = option_id
+            description = str(item.get("description") or "").strip()
+            if description:
+                option["description"] = description
+            normalized_options.append(option)
+
+    return {
+        "question": question,
+        "options": normalized_options,
+        "allow_free_text": bool(payload.get("allow_free_text", True)),
+    }
 
 
 # ── individual tool builders ────────────────────────────────────
@@ -39,6 +92,22 @@ def _build_read_url_tool():
         return content or "Could not load page content."
 
     return read_url_tool
+
+
+def _build_request_user_input_tool():
+    from langchain_core.tools import tool
+
+    @tool("request_user_input", args_schema=RequestUserInputArgs)
+    def request_user_input_tool(
+        question: str,
+        options: list[dict[str, Any]] | None = None,
+        allow_free_text: bool = True,
+    ) -> str:
+        """Ask the user for missing information before continuing the task."""
+        _ = (question, options, allow_free_text)
+        return "User input requested."
+
+    return request_user_input_tool
 
 
 def _build_python_exec_tool():
@@ -117,6 +186,7 @@ def build_agent_tools(
         available["web_search"] = _build_web_search_tool(search_provider)
 
     available["read_url"] = _build_read_url_tool()
+    available["request_user_input"] = _build_request_user_input_tool()
 
     if os.environ.get("ENABLE_CODE_INTERPRETER", "").strip() == "1":
         available["python_exec"] = _build_python_exec_tool()

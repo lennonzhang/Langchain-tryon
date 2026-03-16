@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, { shortModelName } from "../App";
 import { useChatUiStore } from "../shared/store/chatUiStore";
 import { MemorySessionRepository } from "../entities/session/memorySessionRepository";
+import { CONNECTED_TEXT } from "../utils/models";
 
 const fetchCapabilities = vi.fn();
 const streamChat = vi.fn();
@@ -352,10 +353,8 @@ describe("App behavior (session v2)", () => {
     expect(await within(messageList).findByText("final answer")).toBeInTheDocument();
 
     await userEvent.click(screen.getByLabelText("New chat"));
-    await waitFor(() => {
-      expect(within(messageList).queryByText("final answer")).toBeNull();
-      expect(within(messageList).getByText("Connected. Type your question to start.")).toBeInTheDocument();
-    });
+    expect(within(messageList).queryByText("final answer")).toBeNull();
+    expect(within(messageList).getByText(CONNECTED_TEXT)).toBeInTheDocument();
 
     await userEvent.type(await findComposerInput(), "draft keeps me");
 
@@ -411,6 +410,123 @@ describe("App behavior (session v2)", () => {
     fireEvent.submit(document.querySelector("form.composer"));
 
     expect(await screen.findByText("Error: boom")).toBeInTheDocument();
+  });
+
+  it("shows clarification card and option click continues as a normal next turn", async () => {
+    streamChat
+      .mockImplementationOnce(async (_payload, handlers) => {
+        handlers.onEvent({
+          type: "user_input_required",
+          question: "Which environment should I use?",
+          options: [
+            { id: "staging", label: "staging", description: "Validate first" },
+            { id: "prod", label: "production" },
+          ],
+          allow_free_text: true,
+        });
+        handlers.onEvent({ type: "done", finish_reason: "user_input_required" });
+        handlers.onDone?.({ type: "done", finish_reason: "user_input_required" });
+      })
+      .mockImplementationOnce(async (_payload, handlers) => {
+        handlers.onEvent({ type: "token", content: "continued answer" });
+        handlers.onEvent({ type: "done", finish_reason: "stop" });
+        handlers.onDone?.({ type: "done", finish_reason: "stop" });
+      });
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "help me deploy");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    expect(await screen.findByText("Need Your Input")).toBeInTheDocument();
+    const messageList = screen.getByTestId("messages-list");
+    expect(within(messageList).getByText("Which environment should I use?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /staging/i })).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+    // Answer section should be hidden when clarification is active
+    expect(screen.queryByText("Answer")).not.toBeInTheDocument();
+    // Sidebar preview should also show the question text
+    expect(within(screen.getByRole("complementary")).getByText(/Which environment/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /staging/i }));
+
+    expect(await within(messageList).findByText("continued answer")).toBeInTheDocument();
+    expect(streamChat).toHaveBeenCalledTimes(2);
+    expect(streamChat.mock.calls[1][0].message).toBe("staging");
+    expect(streamChat.mock.calls[1][0].history.some((item) => item.content.includes("Which environment should I use?"))).toBe(true);
+    // Old clarification card should now show answered state
+    expect(screen.getByText("Answered")).toBeInTheDocument();
+  });
+
+  it("keeps clarification submit blocked while another session is running", async () => {
+    streamChat.mockImplementationOnce(async (_payload, handlers) => {
+      handlers.onEvent({
+        type: "user_input_required",
+        question: "Which environment should I use?",
+        options: [
+          { id: "staging", label: "staging", description: "Validate first" },
+          { id: "prod", label: "production" },
+        ],
+        allow_free_text: true,
+      });
+      handlers.onEvent({ type: "done", finish_reason: "user_input_required" });
+      handlers.onDone?.({ type: "done", finish_reason: "user_input_required" });
+    });
+    const pending = mockPendingAbortableStream();
+    streamChat.mockImplementationOnce(async (_payload, handlers) => {
+      handlers.onEvent({ type: "token", content: "continued answer" });
+      handlers.onEvent({ type: "done", finish_reason: "stop" });
+      handlers.onDone?.({ type: "done", finish_reason: "stop" });
+    });
+
+    render(<App />);
+    await userEvent.type(await findComposerInput(), "help me deploy");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    expect(await screen.findByText("Need Your Input")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /staging/i })).toBeEnabled();
+
+    await userEvent.click(screen.getByLabelText("New chat"));
+    await userEvent.type(await findComposerInput(), "session two question");
+    fireEvent.submit(document.querySelector("form.composer"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+      expect(screen.getByText("Generating response...")).toBeInTheDocument();
+      expect(pending.getHandlers()).toBeTruthy();
+    });
+
+    const sessionList = screen.getByTestId("session-list");
+    const clarificationSessionButton = within(sessionList).getByText("help me deploy").closest(".session-item");
+    expect(clarificationSessionButton).toBeTruthy();
+    await userEvent.click(clarificationSessionButton);
+
+    const lockedOption = await screen.findByRole("button", { name: /staging/i });
+    const lockedFreeInput = screen.getByLabelText("Free-text clarification input");
+    expect(lockedOption).toBeDisabled();
+    expect(lockedFreeInput).toBeDisabled();
+    expect(screen.getByText("Response running in another session. Open it to stop.")).toBeInTheDocument();
+    expect(streamChat).toHaveBeenCalledTimes(2);
+
+    const runningSessionButton = sessionList.querySelector(".session-row.is-running .session-item");
+    expect(runningSessionButton).toBeTruthy();
+    await userEvent.click(runningSessionButton);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await screen.findByText("Ready");
+
+    const clarificationSessionButtonAgain = within(sessionList).getByText("help me deploy").closest(".session-item");
+    expect(clarificationSessionButtonAgain).toBeTruthy();
+    await userEvent.click(clarificationSessionButtonAgain);
+    const unlockedOption = await screen.findByRole("button", { name: /staging/i });
+    expect(unlockedOption).toBeEnabled();
+    await userEvent.click(unlockedOption);
+
+    const messageList = screen.getByTestId("messages-list");
+    expect(await within(messageList).findByText("continued answer")).toBeInTheDocument();
+    expect(streamChat).toHaveBeenCalledTimes(3);
+    expect(streamChat.mock.calls[2][0].message).toBe("staging");
   });
 
   it("shows typing only for current streaming message after a previous failed message", async () => {

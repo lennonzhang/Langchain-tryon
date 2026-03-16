@@ -2,6 +2,7 @@ import { forwardRef, memo } from "react";
 import RichBlock from "./RichBlock";
 import StreamMessage from "./StreamMessage";
 import CopyButton from "./CopyButton";
+import { CONNECTED_TEXT } from "../utils/models";
 
 const UserMessage = memo(function UserMessage({ msg }) {
   return (
@@ -12,10 +13,15 @@ const UserMessage = memo(function UserMessage({ msg }) {
 });
 
 const AssistantMessage = memo(function AssistantMessage({ msg }) {
+  const isConnectedPlaceholder = msg.id === "connected" && msg.content === CONNECTED_TEXT;
   return (
     <div className="msg assistant">
-      {msg.content && <CopyButton text={msg.content} />}
-      <RichBlock className="assistant-body" text={msg.content} />
+      {!isConnectedPlaceholder && msg.content && <CopyButton text={msg.content} />}
+      {isConnectedPlaceholder ? (
+        <div className="assistant-body">{msg.content}</div>
+      ) : (
+        <RichBlock className="assistant-body" text={msg.content} />
+      )}
     </div>
   );
 });
@@ -30,7 +36,18 @@ function SkeletonMessages() {
   );
 }
 
-const MessageList = forwardRef(function MessageList({ messages, isPending, currentRequestId, onScroll, loading }, ref) {
+const MessageList = forwardRef(function MessageList(
+  {
+    messages,
+    isPending,
+    currentRequestId,
+    onScroll,
+    loading,
+    onSelectClarificationOption,
+    canSubmitClarification = true,
+  },
+  ref,
+) {
   const latestStreamRequestId = [...messages]
     .reverse()
     .find((msg) => msg.role === "assistant_stream" && msg.requestId)?.requestId || null;
@@ -52,6 +69,8 @@ const MessageList = forwardRef(function MessageList({ messages, isPending, curre
               msg={msg}
               showTyping={showTyping}
               isCurrentRequestMessage={isCurrentRequestMessage}
+              onSelectClarificationOption={onSelectClarificationOption}
+              canSubmitClarification={canSubmitClarification}
             />
           );
         }

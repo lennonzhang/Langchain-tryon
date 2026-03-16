@@ -38,6 +38,36 @@ class TestStreamAgenticTimeout(unittest.TestCase):
         done_event = events[done_idx]
         self.assertEqual(done_event["finish_reason"], "error")
 
+    def test_user_input_interrupt_emits_terminal_reason(self):
+        def interrupting_agent(event_emitter=None, **kwargs):
+            _ = kwargs
+            event_emitter(
+                {
+                    "type": "user_input_required",
+                    "question": "Which environment should I use?",
+                    "options": [{"label": "staging"}],
+                    "allow_free_text": True,
+                    "step": 1,
+                }
+            )
+
+        events = list(
+            stream_agentic(
+                client=None,
+                model="openai/gpt-5.3-codex",
+                message="hello",
+                history=[],
+                thinking_mode=False,
+                emit_reasoning=False,
+                run_web_search=lambda *a, **kw: ("", []),
+                run_agent=interrupting_agent,
+            )
+        )
+
+        self.assertTrue(any(event["type"] == "user_input_required" for event in events))
+        self.assertEqual(events[-1], {"type": "done", "finish_reason": "user_input_required"})
+        self.assertFalse(any(event.get("type") == "context_usage" and event.get("usage", {}).get("phase") == "final" for event in events))
+
 
 if __name__ == "__main__":
     unittest.main()

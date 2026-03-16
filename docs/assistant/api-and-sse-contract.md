@@ -82,6 +82,7 @@ Full matrix:
 - `tool_call`
 - `tool_result`
 - `agent_reflect`
+- `user_input_required`
 
 ## Event Envelope and Invariants
 
@@ -93,6 +94,16 @@ Full matrix:
   - frontend calls `POST /api/chat/cancel`
   - backend attempts to cancel the active request
   - stream ends with `done` and `finish_reason: "stop"`
+- Agent clarification is a normal terminal path:
+  - backend emits `user_input_required` (with `question`, `options`, `allow_free_text`)
+  - `question` is truncated to 500 chars at word boundary; `options` capped at 3 (excess logged as warning)
+  - a `ToolMessage(content="User input requested.")` is appended to agent state so the `request_user_input` tool_call has a matching result — required for Phase B resumption and LLM conversation integrity
+  - stream ends with `done` and `finish_reason: "user_input_required"` (no terminal `context_usage`)
+  - frontend preserves the question text for preview/history continuity and creates `msg.clarification` with `answered: false`; the Answer section is hidden while `msg.clarification` exists
+  - when `allow_free_text` is true (default), the clarification card renders an inline text input alongside any option buttons
+  - the next user reply marks the previous clarification as `answered: true` (permanently disabling the old card) before starting a new stream
+  - clarification replies follow the same global single in-flight rule as normal sends; if another session is streaming, submit remains blocked until that run stops
+  - `toApiHistory` uses `clarification.question` (not `answer`) for transcript continuity
 - Agent timeout: `600s` soft deadline; if exceeded, emit `error` then `done(error)`.
 - Do not silently rename SSE event names.
 

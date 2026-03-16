@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand";
 import { useAttachments } from "./hooks/useAttachments";
 import { useAutoFollowScroll } from "./hooks/useAutoFollowScroll";
@@ -18,6 +18,7 @@ export { shortModelName };
 
 function AppContent() {
   const autoScrollThresholdPx = 150;
+  const composerFormRef = useRef(null);
   const { models, model, setModel, supportsThinking, supportsMedia } = useCapabilitiesQuery();
   const [webSearch, setWebSearch] = useState(false);
   const [thinkingMode, setThinkingMode] = useState(true);
@@ -121,6 +122,13 @@ function AppContent() {
     (value) => setDraft(activeSessionId, value),
     [setDraft, activeSessionId]
   );
+  const handleSelectClarificationOption = useCallback((label) => {
+    const text = String(label || "").trim();
+    if (!text) return;
+    if (useChatUiStore.getState().pendingBySessionId[activeSessionId]) return;
+    setDraft(activeSessionId, text);
+    queueMicrotask(() => composerFormRef.current?.requestSubmit());
+  }, [activeSessionId, setDraft]);
 
   return (
     <div
@@ -181,9 +189,12 @@ function AppContent() {
           ref={messagesRef}
           onScroll={handleMessagesScroll}
           loading={isSessionDetailLoading}
+          onSelectClarificationOption={handleSelectClarificationOption}
+          canSubmitClarification={!isGlobalPending}
         />
 
         <Composer
+          formRef={composerFormRef}
           models={models}
           model={model}
           onModelChange={setModel}

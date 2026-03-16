@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import patch
 
 from backend.model_registry import (
     _reset_active,
@@ -348,6 +349,18 @@ class TestEnvDrivenModels(unittest.TestCase):
         m = get_by_id("nvidia/fake/nonexistent-model")
         self.assertIsNotNone(m)
         self.assertEqual(m["provider"], "nvidia")
+
+
+    def test_env_file_is_loaded_before_active_catalog_is_built(self):
+        def fake_load_env_file(*_args, **_kwargs):
+            os.environ["OPENAI_MODELS"] = "gpt-5.4"
+
+        with patch("backend.domain.model_catalog.load_env_file", side_effect=fake_load_env_file) as load_mock:
+            _reset_active()
+            ids = get_ids()
+
+        self.assertEqual(ids, ("openai/gpt-5.4",))
+        load_mock.assert_called()
 
 
 if __name__ == "__main__":

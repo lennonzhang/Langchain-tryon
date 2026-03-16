@@ -3,6 +3,7 @@ import ModelSelect from "./ModelSelect";
 import AttachStrip from "./AttachStrip";
 
 function Composer({
+  formRef,
   models,
   model,
   onModelChange,
@@ -28,7 +29,7 @@ function Composer({
   const sendDisabled = Boolean(isPending && !stopMode);
 
   return (
-    <form className="composer" onSubmit={onSubmit}>
+    <form ref={formRef} className="composer" onSubmit={onSubmit}>
       <div className="input-shell">
         {supportsMedia && (
           <AttachStrip

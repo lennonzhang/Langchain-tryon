@@ -1,4 +1,5 @@
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -20,6 +21,12 @@ class TestGatewayApp(unittest.TestCase):
         self._api_key_patcher = patch("backend.gateway.app._gateway_api_key", return_value="test-api-key")
         self._api_key_patcher.start()
         self.addCleanup(self._api_key_patcher.stop)
+
+    @contextmanager
+    def _frontend_dist_fixture(self):
+        dist_dir = Path(__file__).resolve().parent / "fixtures" / "frontend_dist"
+        with patch.object(gateway_app_module, "FRONTEND_DIST_DIR", dist_dir):
+            yield "app.js"
 
     def test_capabilities_route(self):
         response = self.client.get("/api/capabilities")
@@ -133,6 +140,7 @@ class TestGatewayApp(unittest.TestCase):
             response = self.client.post("/api/chat/stream", json=payload)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "text/event-stream; charset=utf-8")
+        self.assertEqual(response.headers["cache-control"], "no-cache, no-transform")
         body = response.text
         self.assertIn('"type": "error"', body)
         self.assertIn('"error": "gateway queue is full"', body)
@@ -146,12 +154,28 @@ class TestGatewayApp(unittest.TestCase):
             gate.acquire = AsyncMock(side_effect=QueueTimeoutError("gateway queue timeout"))
             response = self.client.post("/api/chat/stream", json=payload)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-cache, no-transform")
         body = response.text
         self.assertIn('"type": "error"', body)
         self.assertIn('"error": "gateway queue timeout"', body)
         self.assertIn('"type": "done"', body)
         self.assertIn('"finish_reason": "error"', body)
         self.assertIn('"request_id": "rid-stream-queue-timeout"', body)
+
+    def test_chat_stream_success_uses_streaming_safe_cache_control(self):
+        payload = {"message": "hello", "request_id": "rid-stream-success"}
+        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
+            gate.acquire = AsyncMock(return_value=None)
+            gate.release = AsyncMock(return_value=None)
+            with patch(
+                "backend.gateway.app.stream_chat",
+                return_value=iter([{"type": "done", "finish_reason": "stop"}]),
+            ):
+                response = self.client.post("/api/chat/stream", json=payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "text/event-stream; charset=utf-8")
+        self.assertEqual(response.headers["cache-control"], "no-cache, no-transform")
+        self.assertIn('"finish_reason": "stop"', response.text)
 
     def test_chat_stream_duplicate_request_id_emits_error_and_done(self):
         payload = {"message": "hello", "request_id": "rid-stream-duplicate"}
@@ -240,6 +264,26 @@ class TestGatewayApp(unittest.TestCase):
             response = self.client.get("/..%2FREADME.md")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"error": "Forbidden"})
+
+    def test_frontend_root_serves_index_with_no_cache(self):
+        with self._frontend_dist_fixture():
+            response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-cache")
+        self.assertIn("text/html", response.headers["content-type"])
+
+    def test_frontend_spa_fallback_serves_index_with_no_cache(self):
+        with self._frontend_dist_fixture():
+            response = self.client.get("/chat")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-cache")
+        self.assertIn("text/html", response.headers["content-type"])
+
+    def test_frontend_assets_are_served_with_immutable_cache_control(self):
+        with self._frontend_dist_fixture() as asset_name:
+            response = self.client.get(f"/assets/{asset_name}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "public, max-age=31536000, immutable")
 
     def test_cancel_route_stays_available_while_shutdown_requested(self):
         app.state.shutdown_requested = True

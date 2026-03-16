@@ -32,13 +32,14 @@ describe("parseEventStream", () => {
       'data: {"type":"token","content":"ignored"}\n\n',
     ]);
 
-    await parseEventStream(reader, (evt) => events.push(evt));
+    const doneEvent = await parseEventStream(reader, (evt) => events.push(evt));
 
     expect(events).toEqual([
       { type: "token", content: "Hello" },
       { type: "token", content: " world" },
       { type: "done", finish_reason: "stop" },
     ]);
+    expect(doneEvent).toEqual({ type: "done", finish_reason: "stop" });
     expect(reader.cancelled).toBe(true);
   });
 

@@ -78,6 +78,8 @@ def run_agent(
         "step_end_emitted": False,
         "enable_planning": agent_cfg.get("enable_planning", False),
         "enable_reflection": agent_cfg.get("enable_reflection", False),
+        "pending_user_input": None,
+        "interrupted_for_user_input": False,
     }
 
     if cancel_token is not None and cancel_token.cancelled:

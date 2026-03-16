@@ -66,11 +66,12 @@ export function useStreamController() {
       }
       return onEvent(event);
     };
+    const wrappedOnDone = (doneEvent) => onDone?.(doneEvent);
 
     try {
       while (attempt <= MAX_RETRIES) {
         try {
-          await streamChat(payload, { onEvent: wrappedOnEvent, onDone }, { signal: controller.signal });
+          await streamChat(payload, { onEvent: wrappedOnEvent, onDone: wrappedOnDone }, { signal: controller.signal });
           break; // success
         } catch (error) {
           if (error.name === "AbortError") {

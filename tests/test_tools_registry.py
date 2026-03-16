@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from backend.search_provider import SearchProvider
-from backend.tools_registry import build_agent_tools
+from backend.tools_registry import build_agent_tools, normalize_request_user_input_args
 
 
 class TestToolsRegistry(unittest.TestCase):
@@ -93,6 +93,27 @@ class TestToolsRegistry(unittest.TestCase):
         names = [t.name for t in tools]
         self.assertNotIn("web_search", names)
         self.assertIn("read_url", names)
+        self.assertIn("request_user_input", names)
+
+    def test_normalize_request_user_input_args(self):
+        normalized = normalize_request_user_input_args(
+            {
+                "question": "  Which region should I use?  ",
+                "options": [
+                    {"label": "US", "description": "United States"},
+                    {"label": "  "},
+                    {"label": "EU"},
+                    {"label": "APAC"},
+                    {"label": "extra"},
+                ],
+                "allow_free_text": False,
+            }
+        )
+
+        self.assertEqual(normalized["question"], "Which region should I use?")
+        self.assertEqual(len(normalized["options"]), 3)
+        self.assertEqual(normalized["options"][0]["label"], "US")
+        self.assertFalse(normalized["allow_free_text"])
 
 
 if __name__ == "__main__":

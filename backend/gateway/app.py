@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import stat
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -17,6 +18,8 @@ from backend.gateway.admission import AdmissionGate, QueueFullError, QueueTimeou
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
+_DEFAULT_FRONTEND_DIST_DIR = FRONTEND_DIST_DIR
+_FRONTEND_DIST_ROOT = FRONTEND_DIST_DIR.resolve()
 
 app = FastAPI()
 _ADMISSION_GATE = AdmissionGate.from_env()
@@ -25,6 +28,9 @@ app.state.shutdown_requested = False
 _MAX_JSON_BODY = 10 * 1024 * 1024
 _MAX_REQUEST_ID_CHARS = ChatRequest._MAX_REQUEST_ID_CHARS
 _SHUTDOWN_MESSAGE = "Server shutting down"
+_SSE_CACHE_CONTROL = "no-cache, no-transform"
+_INDEX_CACHE_CONTROL = "no-cache"
+_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 class GatewayRequestError(Exception):
@@ -124,12 +130,12 @@ def _stream_error_response(message: str, request_id: str | None) -> StreamingRes
     return StreamingResponse(
         generate(),
         media_type="text/event-stream; charset=utf-8",
-        headers={"Cache-Control": "no-cache", "Connection": "close"},
+        headers={"Cache-Control": _SSE_CACHE_CONTROL, "Connection": "close"},
     )
 
 
 def _safe_frontend_target(rel_path: str) -> tuple[Path | None, int | None]:
-    frontend_root = FRONTEND_DIST_DIR.resolve()
+    frontend_root = _resolved_frontend_dist_root()
     if rel_path in {"", "/"}:
         return frontend_root / "index.html", None
 
@@ -143,6 +149,42 @@ def _safe_frontend_target(rel_path: str) -> tuple[Path | None, int | None]:
     except ValueError:
         return None, 403
     return target, None
+
+
+def _stat_regular_file(path: Path):
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(stat_result.st_mode):
+        return None
+    return stat_result
+
+
+def _frontend_cache_control(path: Path) -> str | None:
+    try:
+        relative_path = path.relative_to(_resolved_frontend_dist_root())
+    except ValueError:
+        return None
+    if relative_path == Path("index.html"):
+        return _INDEX_CACHE_CONTROL
+    if relative_path.parts and relative_path.parts[0] == "assets":
+        return _ASSET_CACHE_CONTROL
+    return None
+
+
+def _frontend_file_response(path: Path, *, stat_result) -> FileResponse:
+    headers: dict[str, str] = {}
+    cache_control = _frontend_cache_control(path)
+    if cache_control is not None:
+        headers["Cache-Control"] = cache_control
+    return FileResponse(path, headers=headers, stat_result=stat_result)
+
+
+def _resolved_frontend_dist_root() -> Path:
+    if FRONTEND_DIST_DIR == _DEFAULT_FRONTEND_DIST_DIR:
+        return _FRONTEND_DIST_ROOT
+    return FRONTEND_DIST_DIR.resolve()
 
 
 @app.post("/api/chat")
@@ -258,7 +300,7 @@ async def post_chat_stream(request: Request):
     return StreamingResponse(
         generate(),
         media_type="text/event-stream; charset=utf-8",
-        headers={"Cache-Control": "no-cache", "Connection": "close"},
+        headers={"Cache-Control": _SSE_CACHE_CONTROL, "Connection": "close"},
     )
 
 
@@ -291,13 +333,15 @@ async def serve_frontend(full_path: str):
     if error_status is not None:
         return _json_error(error_status, "Forbidden")
 
-    if target is not None and target.exists() and target.is_file():
-        return FileResponse(target)
+    target_stat = _stat_regular_file(target) if target is not None else None
+    if target is not None and target_stat is not None:
+        return _frontend_file_response(target, stat_result=target_stat)
 
     if "." in Path(rel_path.lstrip("/")).name:
         return _json_error(404, "Not found")
 
     fallback = FRONTEND_DIST_DIR / "index.html"
-    if fallback.exists():
-        return FileResponse(fallback)
+    fallback_stat = _stat_regular_file(fallback)
+    if fallback_stat is not None:
+        return _frontend_file_response(fallback, stat_result=fallback_stat)
     return _json_error(404, "Not found")

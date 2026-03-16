@@ -164,4 +164,26 @@ describe("useStreamController", () => {
 
     expect(order).toEqual(["error-start", "400 upstream failed"]);
   });
+
+  it("forwards terminal done payload to onDone", async () => {
+    streamChat.mockImplementationOnce(async (_payload, handlers) => {
+      await handlers.onDone?.({ type: "done", finish_reason: "user_input_required" });
+    });
+
+    const captureRef = { current: null };
+    render(<ControllerHarness captureRef={captureRef} />);
+
+    const doneEvents = [];
+    await captureRef.current.startStream({
+      payload: { message: "x", request_id: "req-4" },
+      onEvent: () => {},
+      onDone: async (event) => {
+        doneEvents.push(event);
+      },
+      onTransportError: () => {},
+      onAborted: () => {},
+    });
+
+    expect(doneEvents).toEqual([{ type: "done", finish_reason: "user_input_required" }]);
+  });
 });

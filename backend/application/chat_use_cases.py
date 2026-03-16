@@ -86,12 +86,17 @@ class ChatOnceUseCase:
             )
             if should_use_agentic_flow(ctx.resolved_model, ctx.agent_mode):
                 collected_tokens: list[str] = []
+                clarification_question: str | None = None
 
                 def collect(event: dict) -> None:
+                    nonlocal clarification_question
                     if ctx.cancel_token.cancelled:
                         return
                     if event.get("type") == "token":
                         collected_tokens.append(event.get("content", ""))
+                    elif event.get("type") == "user_input_required":
+                        question = str(event.get("question") or "").strip()
+                        clarification_question = question or "Please provide the missing information."
 
                 search_provider = self._deps.search_service.provider(lambda _evt: None, cancel_token=ctx.cancel_token)
                 with proxy_env_guard():
@@ -105,6 +110,8 @@ class ChatOnceUseCase:
                         event_emitter=collect,
                         cancel_token=ctx.cancel_token,
                     )
+                if clarification_question:
+                    return clarification_question
                 return "".join(collected_tokens) or "(No answer produced)"
 
             initial_search_context = ""

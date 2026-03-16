@@ -10,7 +10,8 @@ export function toApiHistory(messages) {
       continue;
     }
     if (message.role === "assistant_stream" && message.status === "done") {
-      history.push({ role: "assistant", content: message.answer || "" });
+      const content = message.clarification?.question || message.answer || "";
+      history.push({ role: "assistant", content });
     }
   }
   return history;

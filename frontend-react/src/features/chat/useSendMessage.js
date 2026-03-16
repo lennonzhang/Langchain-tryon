@@ -93,6 +93,21 @@ export function useSendMessage({
           return;
         }
 
+        // Mark any unanswered clarification in this session as answered.
+        // Placed after the global pending check so we don't consume the
+        // clarification state when the actual message won't be sent.
+        const prevMessages = session.messages || [];
+        const lastClarification = [...prevMessages].reverse().find(
+          (m) => m.role === "assistant_stream" && m.clarification && !m.clarification.answered
+        );
+        if (lastClarification) {
+          await repository.updateMessage(sessionId, lastClarification.id, (msg) => ({
+            ...msg,
+            clarification: { ...msg.clarification, answered: true },
+          }));
+          await syncSessionToCache(queryClient, repository, sessionId);
+        }
+
         const requestId = nextRequestId();
         const userId = nextId("msg");
         const streamId = nextId("msg");
@@ -107,6 +122,8 @@ export function useSendMessage({
           requestId,
           role: "assistant_stream",
           status: "streaming",
+          finishReason: null,
+          clarification: null,
           search: { state: "hidden", query: "", results: [], error: "" },
           usageLines: [],
           reasoning: "",
@@ -148,6 +165,7 @@ export function useSendMessage({
 
           try {
             const errorText = payload.errorText || terminalErrorText;
+            const finishReason = payload.finishReason || null;
             if (cause === "error" || (cause === "done" && errorText)) {
               const finalErrorText = errorText || "Request failed";
               await repository.updateMessage(sessionId, streamId, (message) => {
@@ -155,6 +173,7 @@ export function useSendMessage({
                 return {
                   ...message,
                   status: "failed",
+                  finishReason: finishReason || "error",
                   answer: `Error: ${finalErrorText}`,
                 };
               });
@@ -170,7 +189,7 @@ export function useSendMessage({
                   msg.answer && msg.answer !== "Thinking..."
                     ? msg.answer
                     : "Canceled by user.";
-                return { ...msg, status: "done", answer };
+                return { ...msg, status: "done", finishReason: "stop", answer };
               });
               await syncSessionToCache(queryClient, repository, sessionId);
               useChatUiStore.getState().finishRequest(sessionId);
@@ -180,7 +199,7 @@ export function useSendMessage({
             await repository.updateMessage(sessionId, streamId, (msg) => {
               if (msg.status !== "streaming") return msg;
               const answer = !msg.answer || msg.answer === "Thinking..." ? "(empty response)" : msg.answer;
-              return { ...msg, status: "done", answer };
+              return { ...msg, status: "done", finishReason, answer };
             });
             await syncSessionToCache(queryClient, repository, sessionId);
             useChatUiStore.getState().finishRequest(sessionId);
@@ -217,8 +236,8 @@ export function useSendMessage({
             await repository.updateMessage(sessionId, streamId, (message) => mapStreamEventToPatch(message, streamEvent));
             patchStreamMessageInCache(queryClient, sessionId, streamId, streamEvent);
           },
-          onDone: async () => {
-            await finalizeStreamOnce("done");
+          onDone: async (doneEvent) => {
+            await finalizeStreamOnce("done", { finishReason: doneEvent?.finish_reason || null });
           },
           onTransportError: async (errorText) => {
             await finalizeStreamOnce("error", { errorText });
