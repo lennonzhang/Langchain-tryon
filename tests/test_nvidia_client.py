@@ -73,6 +73,7 @@ class TestNvidiaClient(unittest.TestCase):
                 os.environ,
                 {
                     "TAVILY_TIMEOUT_SECONDS": "",
+                    "TAVILY_EXTRACT_TIMEOUT_SECONDS": "",
                     "TAVILY_MAX_EXTRACT_RESULTS": "",
                     "WEB_LOADER_TIMEOUT_SECONDS": "2.5",
                     "WEB_SEARCH_TOTAL_BUDGET_SECONDS": "5.5",
@@ -102,6 +103,7 @@ class TestNvidiaClient(unittest.TestCase):
                 os.environ,
                 {
                     "TAVILY_TIMEOUT_SECONDS": "8.5",
+                    "TAVILY_EXTRACT_TIMEOUT_SECONDS": "",
                     "TAVILY_MAX_EXTRACT_RESULTS": "2",
                     "WEB_LOADER_TIMEOUT_SECONDS": "2.5",
                     "WEB_SEARCH_TOTAL_BUDGET_SECONDS": "5.5",
@@ -120,6 +122,35 @@ class TestNvidiaClient(unittest.TestCase):
             include_page_content=True,
             page_timeout_s=8.5,
             total_budget_s=8.5,
+            max_pages=2,
+            concurrency=None,
+        )
+
+    def test_run_web_search_prefers_extract_timeout_over_legacy_loader_timeout(self):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "TAVILY_TIMEOUT_SECONDS": "12",
+                    "TAVILY_EXTRACT_TIMEOUT_SECONDS": "40",
+                    "TAVILY_MAX_EXTRACT_RESULTS": "2",
+                    "WEB_LOADER_TIMEOUT_SECONDS": "2.5",
+                    "WEB_SEARCH_TOTAL_BUDGET_SECONDS": "5.5",
+                    "WEB_LOADER_MAX_PAGES": "4",
+                },
+                clear=False,
+            ),
+            patch("backend.web_search.web_search", return_value=[]) as web_search_mock,
+            patch("backend.web_search.format_search_context", return_value=""),
+        ):
+            _run_web_search("question")
+
+        web_search_mock.assert_called_once_with(
+            "question",
+            num_results=5,
+            include_page_content=True,
+            page_timeout_s=40.0,
+            total_budget_s=12.0,
             max_pages=2,
             concurrency=None,
         )

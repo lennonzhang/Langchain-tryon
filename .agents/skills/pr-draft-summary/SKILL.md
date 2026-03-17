@@ -25,6 +25,12 @@ Produce the PR-ready summary required in this repository after substantive code 
 - Commits ahead of the base fork point: `git log --oneline --no-merges ${BASE_COMMIT}..HEAD`.
 - Category signals for this repo: backend (`backend/`), frontend (`frontend-react/`), tests (`tests/`, `frontend-react/src/__tests__/`, `frontend-react/tests/`), docs (`docs/assistant/`, `CLAUDE.md`, `AGENTS.md`, `README.md`), build/config (`requirements.txt`, `package.json`, `server.py`, `vercel.json`).
 
+PowerShell equivalents for Windows environments:
+
+- `$LATEST_RELEASE_TAG = try { & .\.agents\skills\final-release-review\scripts\find_latest_release_tag.ps1 origin 'v*' } catch { git tag -l 'v*' --sort=-v:refname | Select-Object -First 1 }`
+- `$BASE_REF = (git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>$null); if (-not $BASE_REF) { $BASE_REF = 'origin/main' }`
+- `$BASE_COMMIT = (git merge-base --fork-point $BASE_REF HEAD 2>$null); if (-not $BASE_COMMIT) { $BASE_COMMIT = (git merge-base $BASE_REF HEAD 2>$null) }; if (-not $BASE_COMMIT) { $BASE_COMMIT = $BASE_REF }`
+
 ## Workflow
 1) Run the commands above without asking the user; compute `BASE_REF`/`BASE_COMMIT` first so later commands reuse them.
 2) If there are no staged/unstaged/untracked changes and no commits ahead of `${BASE_COMMIT}`, reply briefly that no code changes were detected and skip emitting the PR block.

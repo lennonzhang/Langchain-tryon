@@ -197,8 +197,7 @@ class TestTavilyClient(unittest.TestCase):
         fake_response.raise_for_status.return_value = None
         fake_client = Mock()
         fake_client.post.return_value = fake_response
-        fake_client.__enter__ = Mock(return_value=fake_client)
-        fake_client.__exit__ = Mock(return_value=False)
+        fake_client.is_closed = True
 
         with (
             patch.dict(
@@ -215,8 +214,11 @@ class TestTavilyClient(unittest.TestCase):
             results = client.extract(["https://a"], timeout_seconds=50.0, api_timeout_seconds=40.0)
 
         self.assertEqual(results, {"https://a": "hello"})
-        client_cls.assert_called_once_with(timeout=50.0, verify=False)
+        # Connection-reuse client created with default timeout and ssl_verify=False
+        client_cls.assert_called_once_with(timeout=15.0, verify=False)
+        # Per-request timeout override passed to post()
         post_kwargs = fake_client.post.call_args.kwargs
+        self.assertEqual(post_kwargs["timeout"], 50.0)
         self.assertEqual(post_kwargs["json"]["timeout"], 40.0)
 
     def test_post_translates_timeout(self):

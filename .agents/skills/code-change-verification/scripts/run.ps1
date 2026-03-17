@@ -37,6 +37,7 @@ Invoke-Step -Label "backend tests" -Command {
 Set-Location (Join-Path $repoRoot "frontend-react")
 Invoke-Step -Label "frontend tests" -Command { pnpm test }
 Invoke-Step -Label "frontend e2e tests" -Command { pnpm test:e2e }
+Invoke-Step -Label "frontend visual tests" -Command { pnpm test:visual }
 Invoke-Step -Label "frontend build" -Command { pnpm run build }
 
 Write-Host "code-change-verification: all commands passed."

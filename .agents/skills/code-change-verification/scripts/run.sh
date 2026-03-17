@@ -20,6 +20,9 @@ pnpm test
 echo "Running frontend e2e tests..."
 pnpm test:e2e
 
+echo "Running frontend visual tests..."
+pnpm test:visual
+
 echo "Running frontend build..."
 pnpm run build
 

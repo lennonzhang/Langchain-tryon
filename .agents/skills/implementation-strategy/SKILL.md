@@ -17,6 +17,14 @@ Use this skill before editing code when the task changes runtime behavior or any
    BASE_TAG="$(.agents/skills/final-release-review/scripts/find_latest_release_tag.sh origin 'v*' 2>/dev/null || git tag -l 'v*' --sort=-v:refname | head -n1)"
    echo "$BASE_TAG"
    ```
+   ```powershell
+   try {
+     $BASE_TAG = & .\.agents\skills\final-release-review\scripts\find_latest_release_tag.ps1 origin 'v*'
+   } catch {
+     $BASE_TAG = git tag -l 'v*' --sort=-v:refname | Select-Object -First 1
+   }
+   $BASE_TAG
+   ```
 3. Judge breaking-change risk against that latest release tag, not against unreleased branch churn or post-tag changes already on `main`. If the command fell back to local tags, treat the result as potentially stale and say so.
 4. Prefer the simplest implementation that satisfies the current task. Update callers, tests, and docs directly instead of preserving superseded unreleased interfaces.
 5. Add a compatibility layer only when there is a concrete released consumer, a documented external contract that requires it, or when the user explicitly asks for a migration path.

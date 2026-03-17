@@ -25,7 +25,8 @@ Ensure work is only marked complete after backend tests, frontend tests, and fro
   1. Backend tests: `python -m unittest discover -s tests -v`
   2. Frontend tests (from `frontend-react/`): `pnpm test`
   3. Frontend e2e tests (from `frontend-react/`): `pnpm test:e2e`
-  4. Frontend build (from `frontend-react/`): `pnpm run build`
+  4. Frontend visual tests (from `frontend-react/`): `pnpm test:visual`
+  5. Frontend build (from `frontend-react/`): `pnpm run build`
 - Do not skip steps; stop and fix issues immediately when a command fails.
 - Re-run the full stack after applying fixes so the commands execute in the required order.
 

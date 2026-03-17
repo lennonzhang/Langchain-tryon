@@ -18,6 +18,9 @@ The review must be stable and actionable: avoid variance between runs by using e
    ```bash
    BASE_TAG="$(.agents/skills/final-release-review/scripts/find_latest_release_tag.sh origin 'v*')"
    ```
+   ```powershell
+   $BASE_TAG = & .\.agents\skills\final-release-review\scripts\find_latest_release_tag.ps1 origin 'v*'
+   ```
 3. Choose target commit (default tip of `origin/main`, ensure fresh): `git fetch origin main --prune` then `TARGET="$(git rev-parse origin/main)"`.
 4. Snapshot scope:
    ```bash
@@ -121,5 +124,6 @@ If the report is not blocked, omit the `Unblock checklist` section.
 
 ### Resources
 
-- `scripts/find_latest_release_tag.sh`: Fetches remote tags and returns the newest tag matching a pattern (default `v*`).
+- `scripts/find_latest_release_tag.sh`: Bash helper that fetches remote tags and returns the newest tag matching a pattern (default `v*`).
+- `scripts/find_latest_release_tag.ps1`: PowerShell helper that fetches remote tags and returns the newest tag matching a pattern (default `v*`).
 - `references/review-checklist.md`: Detailed signals and commands for spotting breaking changes, regressions, and release polish gaps.

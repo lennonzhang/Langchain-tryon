@@ -81,7 +81,11 @@ def _run_web_search(
 
     resolved_page_timeout = page_timeout_s
     if resolved_page_timeout is None:
-        resolved_page_timeout = _float_from_env("WEB_LOADER_TIMEOUT_SECONDS")
+        resolved_page_timeout = _float_from_env(
+            "TAVILY_EXTRACT_TIMEOUT_SECONDS",
+            "TAVILY_TIMEOUT_SECONDS",
+            "WEB_LOADER_TIMEOUT_SECONDS",
+        )
 
     resolved_total_budget = total_budget_s
     if resolved_total_budget is None:
