@@ -16,7 +16,8 @@
       "Bash(where:*)",
       "Bash(cd:*)",
       "Bash(python:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }

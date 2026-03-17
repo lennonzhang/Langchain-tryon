@@ -1,6 +1,6 @@
 # Runtime and Commands
 
-**Purpose:** Canonical runtime baseline and command reference for agents and maintainers.  
+**Purpose:** Canonical runtime baseline and command reference for agents and maintainers.
 **When to read:** Before running locally, validating changes, or debugging environment issues.
 
 ## Runtime Baseline
@@ -68,15 +68,9 @@ pnpm test
 pnpm test:e2e
 ```
 
-## Validation Command Set
+## Validation
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-cd frontend-react
-pnpm test
-pnpm test:e2e
-pnpm run build
-```
+Run `$code-change-verification` or execute manually — see [`.agents/skills/code-change-verification/SKILL.md`](../../.agents/skills/code-change-verification/SKILL.md).
 
 ## Related
 
