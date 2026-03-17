@@ -36,8 +36,10 @@ TAVILY_API_KEY=tvly-your-key
 TAVILY_BASE_URL=https://api.tavily.com
 TAVILY_TIMEOUT_SECONDS=15
 TAVILY_SEARCH_DEPTH=basic
-TAVILY_EXTRACT_DEPTH=advanced
-TAVILY_MAX_EXTRACT_RESULTS=3
+TAVILY_EXTRACT_DEPTH=basic
+TAVILY_EXTRACT_TIMEOUT_SECONDS=30
+TAVILY_MAX_EXTRACT_RESULTS=2
+TAVILY_SSL_VERIFY=true
 WEB_LOADER_TIMEOUT_SECONDS=2.0
 WEB_SEARCH_TOTAL_BUDGET_SECONDS=4.0
 WEB_LOADER_MAX_PAGES=3
@@ -148,6 +150,7 @@ Open `http://127.0.0.1:8000`.
   - `SEARCH_BACKEND=tavily` uses Tavily Search plus Tavily Extract
   - `SEARCH_BACKEND=legacy` temporarily restores the deprecated DuckDuckGo + local page-loader path for rollback/debugging
   - `web_search` and `read_url` keep their existing tool names; only the default backend implementation changed
+  - `TAVILY_EXTRACT_DEPTH=basic` is the safer default; `TAVILY_EXTRACT_TIMEOUT_SECONDS` and `TAVILY_SSL_VERIFY` exist for slower or VPN-routed environments
 - Direct chat still injects formatted search context into the first `system` message when `web_search=true`; the formatter is now compact and citation-friendly (`[N]` style)
 - Agent reasoning is formatted into readable paragraphs using step-boundary and text heuristics during streaming.
 - Agent-capable models can interrupt a run with a structured clarification question:

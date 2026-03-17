@@ -72,6 +72,8 @@ class TestNvidiaClient(unittest.TestCase):
             patch.dict(
                 os.environ,
                 {
+                    "TAVILY_TIMEOUT_SECONDS": "",
+                    "TAVILY_MAX_EXTRACT_RESULTS": "",
                     "WEB_LOADER_TIMEOUT_SECONDS": "2.5",
                     "WEB_SEARCH_TOTAL_BUDGET_SECONDS": "5.5",
                     "WEB_LOADER_MAX_PAGES": "4",

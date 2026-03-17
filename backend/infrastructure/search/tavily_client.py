@@ -4,6 +4,7 @@ import logging
 import os
 from dataclasses import dataclass
 from json import JSONDecodeError
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -13,8 +14,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TAVILY_BASE_URL = "https://api.tavily.com"
 _DEFAULT_TAVILY_TIMEOUT_SECONDS = 15.0
 _DEFAULT_TAVILY_SEARCH_DEPTH = "basic"
-_DEFAULT_TAVILY_EXTRACT_DEPTH = "advanced"
-_DEFAULT_TAVILY_MAX_EXTRACT_RESULTS = 3
+_DEFAULT_TAVILY_EXTRACT_DEPTH = "basic"
+_DEFAULT_TAVILY_EXTRACT_TIMEOUT_SECONDS = 30.0
+_DEFAULT_TAVILY_MAX_EXTRACT_RESULTS = 2
 _MAX_EXTRACT_RESULTS_LIMIT = 20
 
 
@@ -48,6 +50,13 @@ def _int_env(name: str, default: int, min_value: int, max_value: int | None = No
     return value
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw not in ("0", "false", "no", "off")
+
+
 @dataclass(frozen=True)
 class TavilySettings:
     api_key: str
@@ -55,7 +64,9 @@ class TavilySettings:
     timeout_seconds: float
     search_depth: str
     extract_depth: str
+    extract_timeout_seconds: float
     max_extract_results: int
+    ssl_verify: bool
 
 
 def resolve_search_backend() -> str:
@@ -85,7 +96,13 @@ def resolve_tavily_settings() -> TavilySettings:
         timeout_seconds=timeout_seconds,
         search_depth=_string_env("TAVILY_SEARCH_DEPTH", _DEFAULT_TAVILY_SEARCH_DEPTH),
         extract_depth=_string_env("TAVILY_EXTRACT_DEPTH", _DEFAULT_TAVILY_EXTRACT_DEPTH),
+        extract_timeout_seconds=_float_env(
+            "TAVILY_EXTRACT_TIMEOUT_SECONDS",
+            timeout_seconds if timeout_seconds > _DEFAULT_TAVILY_EXTRACT_TIMEOUT_SECONDS else _DEFAULT_TAVILY_EXTRACT_TIMEOUT_SECONDS,
+            0.1,
+        ),
         max_extract_results=max_extract_results,
+        ssl_verify=_bool_env("TAVILY_SSL_VERIFY", True),
     )
 
 
@@ -99,11 +116,16 @@ class TavilyClient:
         self._settings = settings or resolve_tavily_settings()
         if not self._settings.api_key:
             raise RuntimeError("Missing TAVILY_API_KEY for SEARCH_BACKEND=tavily.")
+        if not self._settings.ssl_verify:
+            logger.warning("SSL verification disabled for Tavily requests")
         self._http: httpx.Client | None = None
 
     def _client(self) -> httpx.Client:
         if self._http is None or self._http.is_closed:
-            self._http = httpx.Client(timeout=self._settings.timeout_seconds)
+            self._http = httpx.Client(
+                timeout=self._settings.timeout_seconds,
+                verify=self._settings.ssl_verify,
+            )
         return self._http
 
     def close(self) -> None:
@@ -124,16 +146,23 @@ class TavilyClient:
             )
             response.raise_for_status()
         except httpx.TimeoutException as exc:
+            logger.warning("Tavily %s timeout after %.1fs", endpoint, timeout)
             raise TimeoutError("Tavily request timed out") from exc
+        except httpx.ConnectError as exc:
+            logger.warning("Tavily %s connect error: %s", endpoint, exc)
+            raise RuntimeError(f"Tavily {endpoint} failed: {exc}") from exc
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text[:500]
+            logger.warning("Tavily %s http error status=%s", endpoint, exc.response.status_code)
             raise RuntimeError(f"Tavily {endpoint} failed: status={exc.response.status_code} body={detail}") from exc
         except httpx.HTTPError as exc:
+            logger.warning("Tavily %s transport error: %s", endpoint, exc)
             raise RuntimeError(f"Tavily {endpoint} failed: {exc}") from exc
 
         try:
             data = response.json()
         except (ValueError, JSONDecodeError) as exc:
+            logger.warning("Tavily %s invalid JSON response", endpoint)
             raise RuntimeError(f"Tavily {endpoint} returned invalid JSON.") from exc
         if isinstance(data, dict):
             request_id = data.get("request_id")
@@ -150,6 +179,12 @@ class TavilyClient:
         timeout_seconds: float | None = None,
         search_depth: str | None = None,
     ) -> list[dict]:
+        logger.info(
+            "Tavily search start query=%r depth=%s client_timeout=%.1f",
+            query[:120],
+            search_depth or self._settings.search_depth,
+            timeout_seconds if timeout_seconds is not None else self._settings.timeout_seconds,
+        )
         payload = {
             "query": query,
             "max_results": max(1, int(max_results)),
@@ -157,11 +192,20 @@ class TavilyClient:
             "include_raw_content": False,
             "include_answer": False,
         }
+        started = time.monotonic()
         data = self._post("/search", payload, timeout_seconds=timeout_seconds)
         raw_results = data.get("results")
         if not isinstance(raw_results, list):
             raise RuntimeError("Tavily search response did not include a valid results list.")
-        return [self._normalize_search_result(item) for item in raw_results if isinstance(item, dict)]
+        results = [self._normalize_search_result(item) for item in raw_results if isinstance(item, dict)]
+        logger.info(
+            "Tavily search done request_id=%s response_time=%s elapsed=%.2fs results=%d",
+            data.get("request_id"),
+            data.get("response_time"),
+            time.monotonic() - started,
+            len(results),
+        )
+        return results
 
     def extract(
         self,
@@ -169,17 +213,41 @@ class TavilyClient:
         *,
         timeout_seconds: float | None = None,
         extract_depth: str | None = None,
+        api_timeout_seconds: float | None = None,
     ) -> dict[str, str]:
         normalized_urls = [url.strip() for url in urls if isinstance(url, str) and url.strip()]
         if not normalized_urls:
             return {}
 
+        resolved_api_timeout = (
+            api_timeout_seconds
+            if api_timeout_seconds is not None and api_timeout_seconds > 0
+            else self._settings.extract_timeout_seconds
+        )
+        resolved_client_timeout = (
+            timeout_seconds
+            if timeout_seconds is not None and timeout_seconds > 0
+            else max(self._settings.timeout_seconds, resolved_api_timeout + 5.0)
+        )
+        resolved_client_timeout = max(resolved_client_timeout, resolved_api_timeout + 5.0)
+
+        logger.info(
+            "Tavily extract start url_count=%d depth=%s client_timeout=%.1f api_timeout=%.1f ssl_verify=%s",
+            len(normalized_urls),
+            extract_depth or self._settings.extract_depth,
+            resolved_client_timeout,
+            resolved_api_timeout,
+            self._settings.ssl_verify,
+        )
+
         payload = {
             "urls": normalized_urls,
             "extract_depth": extract_depth or self._settings.extract_depth,
             "include_images": False,
+            "timeout": resolved_api_timeout,
         }
-        data = self._post("/extract", payload, timeout_seconds=timeout_seconds)
+        started = time.monotonic()
+        data = self._post("/extract", payload, timeout_seconds=resolved_client_timeout)
         raw_results = data.get("results")
         if not isinstance(raw_results, list):
             raise RuntimeError("Tavily extract response did not include a valid results list.")
@@ -194,6 +262,30 @@ class TavilyClient:
             content = self._extract_text(item)
             if content:
                 extracted[url] = content
+
+        failed_results = data.get("failed_results")
+        failed_urls: list[str] = []
+        if isinstance(failed_results, list):
+            for item in failed_results:
+                if isinstance(item, dict):
+                    failed_url = str(item.get("url") or "").strip()
+                    if failed_url:
+                        failed_urls.append(failed_url)
+
+        logger.info(
+            "Tavily extract done request_id=%s response_time=%s elapsed=%.2fs results=%d failed_results=%d",
+            data.get("request_id"),
+            data.get("response_time"),
+            time.monotonic() - started,
+            len(extracted),
+            len(failed_urls),
+        )
+        if failed_urls:
+            logger.warning(
+                "Tavily extract partial request_id=%s failed_urls=%s",
+                data.get("request_id"),
+                failed_urls,
+            )
         return extracted
 
     @staticmethod

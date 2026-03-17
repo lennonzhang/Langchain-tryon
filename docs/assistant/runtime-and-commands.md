@@ -27,8 +27,10 @@
 - Tavily base URL env: `TAVILY_BASE_URL` (default `https://api.tavily.com`)
 - Tavily timeout env: `TAVILY_TIMEOUT_SECONDS` (default `15`)
 - Tavily search depth env: `TAVILY_SEARCH_DEPTH` (default `basic`)
-- Tavily extract depth env: `TAVILY_EXTRACT_DEPTH` (default `advanced`)
-- Tavily extract result limit env: `TAVILY_MAX_EXTRACT_RESULTS` (default `3`)
+- Tavily extract depth env: `TAVILY_EXTRACT_DEPTH` (default `basic`)
+- Tavily extract API timeout env: `TAVILY_EXTRACT_TIMEOUT_SECONDS` (default `30`)
+- Tavily extract result limit env: `TAVILY_MAX_EXTRACT_RESULTS` (default `2`)
+- Tavily SSL verify env: `TAVILY_SSL_VERIFY` (default `true`)
 - Legacy search env fallbacks remain accepted during migration: `WEB_LOADER_TIMEOUT_SECONDS`, `WEB_SEARCH_TOTAL_BUDGET_SECONDS`, `WEB_LOADER_MAX_PAGES`, `WEB_LOADER_CONCURRENCY`
 - Local shutdown drain env: `SHUTDOWN_CANCEL_DRAIN_SECONDS` (default `2`)
 - `thinking_mode` default: `true`
@@ -50,6 +52,7 @@ Search backend notes:
 - `SEARCH_BACKEND=legacy` temporarily restores the deprecated DuckDuckGo + local page loader path
 - `web_search` / `read_url` tool names and SSE search events remain unchanged across both paths
 - `WEB_LOADER_CONCURRENCY` remains a legacy compatibility knob; Tavily-backed search ignores it
+- Tavily Extract passes the API-side `timeout` body field and logs request ids / response times / partial failures for troubleshooting
 
 Local `python server.py` shutdown behavior:
 

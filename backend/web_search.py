@@ -78,6 +78,14 @@ def _resolved_extract_limit(max_pages: int | None = None) -> int:
     return resolve_tavily_settings().max_extract_results
 
 
+def _resolved_extract_timeout(page_timeout_s: float | None = None, total_budget_s: float | None = None) -> float:
+    if total_budget_s is not None and total_budget_s > 0:
+        return total_budget_s
+    if page_timeout_s is not None and page_timeout_s > 0:
+        return page_timeout_s
+    return resolve_tavily_settings().extract_timeout_seconds
+
+
 def _resolved_load_timeout(timeout_s: float | None = None) -> float:
     if timeout_s is not None and timeout_s > 0:
         return timeout_s
@@ -87,7 +95,7 @@ def _resolved_load_timeout(timeout_s: float | None = None) -> float:
             _DEFAULT_WEB_LOADER_TIMEOUT_SECONDS,
             0.1,
         )
-    return resolve_tavily_settings().timeout_seconds
+    return resolve_tavily_settings().extract_timeout_seconds
 
 
 def _source_domain(url: str) -> str:
@@ -354,7 +362,11 @@ def load_webpage_content(url: str, max_chars: int = 1800, timeout_s: float | Non
         return _legacy_load_webpage_content(url, max_chars=max_chars, timeout_s=resolved_timeout)
 
     client = TavilyClient()
-    extracted = client.extract([url], timeout_seconds=resolved_timeout)
+    extracted = client.extract(
+        [url],
+        timeout_seconds=resolved_timeout + 5.0,
+        api_timeout_seconds=resolved_timeout,
+    )
     return _normalize_text(extracted.get(url, ""), max_chars=max_chars)
 
 
@@ -380,6 +392,7 @@ def web_search(
 
     _ = concurrency  # Deprecated compatibility knob; Tavily paths do not use local fetch concurrency.
     timeout_s = _resolved_timeout(page_timeout_s=page_timeout_s, total_budget_s=total_budget_s)
+    extract_timeout_s = _resolved_extract_timeout(page_timeout_s=page_timeout_s, total_budget_s=total_budget_s)
     extract_limit = _resolved_extract_limit(max_pages=max_pages)
 
     client = TavilyClient()
@@ -414,9 +427,20 @@ def web_search(
 
     remaining = max(timeout_s - (time.monotonic() - t0), 1.0)
     try:
-        extracted = client.extract(ordered_urls, timeout_seconds=remaining)
+        extracted = client.extract(
+            ordered_urls,
+            timeout_seconds=max(timeout_s, extract_timeout_s + 5.0),
+            api_timeout_seconds=extract_timeout_s,
+        )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Tavily extract failed, returning search-only results: %s", exc)
+        logger.warning(
+            "Tavily extract failed, returning search-only results: urls=%d depth=%s client_timeout=%.1f api_timeout=%.1f error=%s",
+            len(ordered_urls),
+            resolve_tavily_settings().extract_depth,
+            max(timeout_s, extract_timeout_s + 5.0),
+            extract_timeout_s,
+            exc,
+        )
         return normalized_results
 
     for item in normalized_results:

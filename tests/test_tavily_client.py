@@ -42,7 +42,9 @@ class TestTavilySettings(unittest.TestCase):
         self.assertEqual(settings.timeout_seconds, 22.0)
         self.assertEqual(settings.search_depth, "advanced")
         self.assertEqual(settings.extract_depth, "basic")
+        self.assertEqual(settings.extract_timeout_seconds, 30.0)
         self.assertEqual(settings.max_extract_results, 7)
+        self.assertTrue(settings.ssl_verify)
 
     def test_resolve_tavily_settings_falls_back_to_legacy_envs(self):
         with patch.dict(
@@ -50,6 +52,8 @@ class TestTavilySettings(unittest.TestCase):
             {
                 "TAVILY_API_KEY": "tvly-k",
                 "TAVILY_TIMEOUT_SECONDS": "",
+                "TAVILY_EXTRACT_DEPTH": "",
+                "TAVILY_MAX_EXTRACT_RESULTS": "",
                 "WEB_SEARCH_TOTAL_BUDGET_SECONDS": "5",
                 "WEB_LOADER_MAX_PAGES": "2",
             },
@@ -59,6 +63,22 @@ class TestTavilySettings(unittest.TestCase):
 
         self.assertEqual(settings.timeout_seconds, 5.0)
         self.assertEqual(settings.max_extract_results, 2)
+        self.assertEqual(settings.extract_timeout_seconds, 30.0)
+
+    def test_resolve_tavily_settings_reads_extract_timeout_and_ssl_verify(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TAVILY_API_KEY": "tvly-k",
+                "TAVILY_EXTRACT_TIMEOUT_SECONDS": "45",
+                "TAVILY_SSL_VERIFY": "false",
+            },
+            clear=False,
+        ):
+            settings = resolve_tavily_settings()
+
+        self.assertEqual(settings.extract_timeout_seconds, 45.0)
+        self.assertFalse(settings.ssl_verify)
 
 
 class TestTavilyClient(unittest.TestCase):
@@ -112,7 +132,14 @@ class TestTavilyClient(unittest.TestCase):
         fake_client.is_closed = False
 
         with (
-            patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False),
+            patch.dict(
+                os.environ,
+                {
+                    "TAVILY_API_KEY": "tvly-k",
+                    "TAVILY_EXTRACT_DEPTH": "",
+                },
+                clear=False,
+            ),
             patch("backend.infrastructure.search.tavily_client.httpx.Client", return_value=fake_client),
         ):
             client = TavilyClient()
@@ -146,13 +173,51 @@ class TestTavilyClient(unittest.TestCase):
         fake_client.is_closed = False
 
         with (
-            patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False),
+            patch.dict(
+                os.environ,
+                {
+                    "TAVILY_API_KEY": "tvly-k",
+                    "TAVILY_EXTRACT_DEPTH": "",
+                },
+                clear=False,
+            ),
             patch("backend.infrastructure.search.tavily_client.httpx.Client", return_value=fake_client),
         ):
             client = TavilyClient()
             results = client.extract(["https://a", "https://b"])
 
         self.assertEqual(results, {"https://a": "hello", "https://b": "world"})
+        post_kwargs = fake_client.post.call_args.kwargs
+        self.assertEqual(post_kwargs["json"]["timeout"], 30.0)
+        self.assertEqual(post_kwargs["json"]["extract_depth"], "basic")
+
+    def test_extract_uses_ssl_verify_and_explicit_timeouts(self):
+        fake_response = Mock()
+        fake_response.json.return_value = {"results": [{"url": "https://a", "content": "hello"}]}
+        fake_response.raise_for_status.return_value = None
+        fake_client = Mock()
+        fake_client.post.return_value = fake_response
+        fake_client.__enter__ = Mock(return_value=fake_client)
+        fake_client.__exit__ = Mock(return_value=False)
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "TAVILY_API_KEY": "tvly-k",
+                    "TAVILY_SSL_VERIFY": "false",
+                },
+                clear=False,
+            ),
+            patch("backend.infrastructure.search.tavily_client.httpx.Client", return_value=fake_client) as client_cls,
+        ):
+            client = TavilyClient()
+            results = client.extract(["https://a"], timeout_seconds=50.0, api_timeout_seconds=40.0)
+
+        self.assertEqual(results, {"https://a": "hello"})
+        client_cls.assert_called_once_with(timeout=50.0, verify=False)
+        post_kwargs = fake_client.post.call_args.kwargs
+        self.assertEqual(post_kwargs["json"]["timeout"], 40.0)
 
     def test_post_translates_timeout(self):
         fake_client = Mock()

@@ -15,6 +15,7 @@ Moved search and page-reading defaults to Tavily while preserving the existing S
   - default runtime path is now Tavily Search + Tavily Extract
   - `SEARCH_BACKEND=legacy` temporarily restores the deprecated DuckDuckGo + local loader path
   - rewrote `format_search_context()` to a compact citation-friendly format with numbered `[N]` references
+  - added extract-specific timeout handling, richer Tavily request logging, and optional `TAVILY_SSL_VERIFY` support for VPN/proxy troubleshooting
 - Updated `backend/nvidia_client.py`:
   - kept `_run_web_search()` signature stable
   - added Tavily env precedence with legacy timeout/env fallback compatibility
@@ -26,7 +27,7 @@ Moved search and page-reading defaults to Tavily while preserving the existing S
 
 - Rewrote `tests/test_web_search.py` for Tavily-first behavior and legacy fallback coverage
 - Added `tests/test_tavily_client.py` for Tavily env resolution, normalization, and timeout handling
-- Updated `tests/test_nvidia_client.py` for Tavily env precedence
+- Updated `tests/test_nvidia_client.py` for Tavily env precedence and direct-path search fallback behavior
 
 ### Docs
 

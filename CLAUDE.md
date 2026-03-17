@@ -50,7 +50,8 @@ pnpm test:e2e
   - verify frontend isolation by `sessionId + requestId`
 - Web search timeout/failure:
   - check `SEARCH_BACKEND` and confirm Tavily is the active path by default
-  - check `TAVILY_TIMEOUT_SECONDS` first, then legacy timeout fallbacks (`WEB_SEARCH_TOTAL_BUDGET_SECONDS`, `WEB_LOADER_TIMEOUT_SECONDS`)
+  - check `TAVILY_TIMEOUT_SECONDS` for search, then `TAVILY_EXTRACT_TIMEOUT_SECONDS` for Tavily Extract, then legacy timeout fallbacks (`WEB_SEARCH_TOTAL_BUDGET_SECONDS`, `WEB_LOADER_TIMEOUT_SECONDS`)
+  - if requests go through VPN/proxy middleware, check `TAVILY_SSL_VERIFY` and the new Tavily request/response timing logs before changing code
   - `web_search` and `read_url` keep the same tool names; they route to Tavily Search and Tavily Extract unless `SEARCH_BACKEND=legacy`
 
 ## Quick Navigation (Progressive Disclosure)
