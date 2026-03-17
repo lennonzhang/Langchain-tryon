@@ -62,6 +62,37 @@ class TestTavilySettings(unittest.TestCase):
 
 
 class TestTavilyClient(unittest.TestCase):
+    def test_init_raises_without_api_key(self):
+        with patch.dict(os.environ, {"TAVILY_API_KEY": ""}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "Missing TAVILY_API_KEY"):
+                TavilyClient()
+
+    def test_extract_empty_urls_returns_empty_dict(self):
+        with patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False):
+            client = TavilyClient()
+            self.assertEqual(client.extract([]), {})
+
+    def test_close_closes_underlying_client(self):
+        fake_client = Mock()
+        fake_client.is_closed = False
+
+        with (
+            patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False),
+            patch("backend.infrastructure.search.tavily_client.httpx.Client", return_value=fake_client),
+        ):
+            client = TavilyClient()
+            # Force client creation
+            client._client()
+            client.close()
+
+        fake_client.close.assert_called_once()
+
+    def test_close_noop_when_not_created(self):
+        with patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False):
+            client = TavilyClient()
+            # Should not raise
+            client.close()
+
     def test_search_normalizes_results(self):
         fake_response = Mock()
         fake_response.json.return_value = {
@@ -78,8 +109,7 @@ class TestTavilyClient(unittest.TestCase):
         fake_response.raise_for_status.return_value = None
         fake_client = Mock()
         fake_client.post.return_value = fake_response
-        fake_client.__enter__ = Mock(return_value=fake_client)
-        fake_client.__exit__ = Mock(return_value=False)
+        fake_client.is_closed = False
 
         with (
             patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False),
@@ -113,8 +143,7 @@ class TestTavilyClient(unittest.TestCase):
         fake_response.raise_for_status.return_value = None
         fake_client = Mock()
         fake_client.post.return_value = fake_response
-        fake_client.__enter__ = Mock(return_value=fake_client)
-        fake_client.__exit__ = Mock(return_value=False)
+        fake_client.is_closed = False
 
         with (
             patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False),
@@ -128,8 +157,7 @@ class TestTavilyClient(unittest.TestCase):
     def test_post_translates_timeout(self):
         fake_client = Mock()
         fake_client.post.side_effect = httpx.TimeoutException("timeout")
-        fake_client.__enter__ = Mock(return_value=fake_client)
-        fake_client.__exit__ = Mock(return_value=False)
+        fake_client.is_closed = False
 
         with (
             patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False),
@@ -145,8 +173,7 @@ class TestTavilyClient(unittest.TestCase):
         fake_response.json.side_effect = ValueError("not json")
         fake_client = Mock()
         fake_client.post.return_value = fake_response
-        fake_client.__enter__ = Mock(return_value=fake_client)
-        fake_client.__exit__ = Mock(return_value=False)
+        fake_client.is_closed = False
 
         with (
             patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False),

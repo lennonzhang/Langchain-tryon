@@ -99,20 +99,30 @@ class TavilyClient:
         self._settings = settings or resolve_tavily_settings()
         if not self._settings.api_key:
             raise RuntimeError("Missing TAVILY_API_KEY for SEARCH_BACKEND=tavily.")
+        self._http: httpx.Client | None = None
+
+    def _client(self) -> httpx.Client:
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.Client(timeout=self._settings.timeout_seconds)
+        return self._http
+
+    def close(self) -> None:
+        if self._http is not None and not self._http.is_closed:
+            self._http.close()
 
     def _post(self, endpoint: str, payload: dict, *, timeout_seconds: float | None = None) -> dict:
         timeout = timeout_seconds if timeout_seconds is not None else self._settings.timeout_seconds
         try:
-            with httpx.Client(timeout=timeout) as client:
-                response = client.post(
-                    f"{self._settings.base_url}{endpoint}",
-                    json=payload,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {self._settings.api_key}",
-                    },
-                )
-                response.raise_for_status()
+            response = self._client().post(
+                f"{self._settings.base_url}{endpoint}",
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self._settings.api_key}",
+                },
+                timeout=timeout,
+            )
+            response.raise_for_status()
         except httpx.TimeoutException as exc:
             raise TimeoutError("Tavily request timed out") from exc
         except httpx.HTTPStatusError as exc:

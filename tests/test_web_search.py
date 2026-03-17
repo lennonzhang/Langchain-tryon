@@ -83,7 +83,11 @@ class TestWebSearch(unittest.TestCase):
             ],
         )
         client.search.assert_called_once_with("hello", max_results=3, timeout_seconds=15.0)
-        client.extract.assert_called_once_with(["https://a"], timeout_seconds=15.0)
+        extract_call = client.extract.call_args
+        self.assertEqual(extract_call[0][0], ["https://a"])
+        # Extract receives remaining budget (< original timeout but > 0)
+        self.assertGreater(extract_call[1]["timeout_seconds"], 0)
+        self.assertLessEqual(extract_call[1]["timeout_seconds"], 15.0)
 
     def test_web_search_skips_extract_when_include_page_content_is_false(self):
         client = Mock()
@@ -117,7 +121,8 @@ class TestWebSearch(unittest.TestCase):
         self.assertIn("content", results[0])
         self.assertIn("content", results[1])
         self.assertNotIn("content", results[2])
-        client.extract.assert_called_once_with(["https://a1", "https://a2"], timeout_seconds=15.0)
+        extract_call = client.extract.call_args
+        self.assertEqual(extract_call[0][0], ["https://a1", "https://a2"])
 
     def test_web_search_dedupes_urls_before_extract(self):
         client = Mock()
@@ -131,7 +136,8 @@ class TestWebSearch(unittest.TestCase):
         with patch("backend.web_search.TavilyClient", return_value=client):
             results = web_search("hello", num_results=3, max_pages=3)
 
-        client.extract.assert_called_once_with(["https://same", "https://other"], timeout_seconds=15.0)
+        extract_call = client.extract.call_args
+        self.assertEqual(extract_call[0][0], ["https://same", "https://other"])
         self.assertEqual(results[0]["content"], "same text")
         self.assertEqual(results[2]["content"], "other text")
 
@@ -177,6 +183,26 @@ class TestWebSearch(unittest.TestCase):
             max_pages=2,
             concurrency=2,
         )
+
+    def test_web_search_extract_uses_remaining_budget(self):
+        client = Mock()
+        client.search.return_value = [
+            {"title": "T1", "url": "https://a", "snippet": "S1", "source_domain": "a"}
+        ]
+        client.extract.return_value = {"https://a": "page text"}
+
+        # Simulate search taking 3 seconds: monotonic returns 0 before search, 3 after
+        clock = iter([100.0, 103.0])
+        with (
+            patch("backend.web_search.TavilyClient", return_value=client),
+            patch("backend.web_search.time") as mock_time,
+        ):
+            mock_time.monotonic = lambda: next(clock)
+            web_search("hello", num_results=3, total_budget_s=15.0)
+
+        extract_call = client.extract.call_args
+        extract_timeout = extract_call[1]["timeout_seconds"]
+        self.assertAlmostEqual(extract_timeout, 12.0)  # 15 - 3 = 12
 
     def test_web_search_prefers_explicit_timeouts(self):
         client = Mock()

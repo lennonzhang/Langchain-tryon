@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 import re
+import time
 import warnings
 from urllib.parse import urlparse
 
@@ -23,7 +24,6 @@ _DEFAULT_WEB_LOADER_CONCURRENCY = 3
 _DEFAULT_MAX_FORMAT_RESULTS = 5
 _MAX_SNIPPET_CHARS = 240
 _MAX_CONTENT_CHARS = 600
-_MAX_CONTEXT_CHARS = 3200
 
 _BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -52,6 +52,9 @@ def _int_env(name: str, default: int, min_value: int) -> int:
     except ValueError:
         return default
     return value if value >= min_value else min_value
+
+
+_MAX_CONTEXT_CHARS = _int_env("SEARCH_CONTEXT_MAX_CHARS", 3200, 500)
 
 
 def _normalize_text(value: str, max_chars: int) -> str:
@@ -380,6 +383,7 @@ def web_search(
     extract_limit = _resolved_extract_limit(max_pages=max_pages)
 
     client = TavilyClient()
+    t0 = time.monotonic()
     results = client.search(query, max_results=num_results, timeout_seconds=timeout_s)
     normalized_results = [
         {
@@ -408,8 +412,9 @@ def web_search(
     if not ordered_urls:
         return normalized_results
 
+    remaining = max(timeout_s - (time.monotonic() - t0), 1.0)
     try:
-        extracted = client.extract(ordered_urls, timeout_seconds=timeout_s)
+        extracted = client.extract(ordered_urls, timeout_seconds=remaining)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Tavily extract failed, returning search-only results: %s", exc)
         return normalized_results
