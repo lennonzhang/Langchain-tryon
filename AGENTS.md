@@ -6,17 +6,7 @@ Repository-level entry guide for coding agents.
 
 - Applies to the whole repo unless a deeper folder overrides it.
 - Keep changes minimal, testable, and aligned with current architecture.
-
-## Must-Know Constraints (Read First)
-
-- Keep `backend/nvidia_client.py` as the public facade.
-- Non-NVIDIA providers must route through `ProxyGatewayChatModel`.
-- All providers must implement real SSE streaming (no fake full-response streaming).
-- Do not silently rename SSE event names.
-- Error flow invariant is mandatory: `error` must be followed by `done` with `finish_reason: "error"`.
-- Search defaults to Tavily via direct REST integration in `backend/web_search.py`; `SEARCH_BACKEND=legacy` temporarily re-enables the deprecated DuckDuckGo + local loader path.
-- Existing tool names stay stable: `web_search` now means Tavily Search + compact formatter context by default, and `read_url` now means Tavily Extract by default.
-- Update tests and documentation together for behavior changes.
+- Read the relevant L2 docs below before making changes.
 
 ## Quick Navigation (Progressive Disclosure)
 
@@ -38,21 +28,10 @@ L4 detailed references:
 
 - Error status matrix: [`docs/assistant/error-status-matrix.md`](docs/assistant/error-status-matrix.md)
 
-## Fast Defaults
+Skills (`.agents/skills/`):
 
-- Primary chat path: `POST /api/chat/stream`
-- One-shot path: `POST /api/chat`
-- Capabilities path: `GET /api/capabilities`
-- Default model: `openai/gpt-5.3-codex`
-- `thinking_mode` default: `true`
-- `request_id` max length: `256`
-- Auto `agent_mode` when omitted: enabled for qwen/glm/claude/codex/gemini, disabled for kimi
-
-## Documentation Update Rule
-
-When behavior changes, update:
-
-- shared docs under `docs/assistant/*` (single source of truth),
-- this file `AGENTS.md` and `CLAUDE.md` entry links if needed,
-- `CHANGELOG.md`,
-- `README.md` if user-facing behavior changed.
+- `code-change-verification` — run `$code-change-verification` after code changes
+- `docs-sync` — run `$docs-sync` when auditing or updating documentation
+- `final-release-review` — run `$final-release-review` before releases
+- `implementation-strategy` — run `$implementation-strategy` before changing APIs or contracts
+- `pr-draft-summary` — run `$pr-draft-summary` when wrapping up a task

@@ -12,23 +12,6 @@ Full-stack LangChain chat app:
 
 Default endpoint: `POST /api/chat/stream`.
 
-## Common Commands
-
-```bash
-# backend (repo root)
-python server.py
-python -m unittest discover -s tests -v
-```
-
-```bash
-# frontend (from frontend-react/)
-pnpm install
-pnpm run dev
-pnpm run build
-pnpm test
-pnpm test:e2e
-```
-
 ## Quick Troubleshooting
 
 - OpenAI Responses `400`:
@@ -73,22 +56,9 @@ L4 detailed references:
 
 - Error status matrix: [`docs/assistant/error-status-matrix.md`](docs/assistant/error-status-matrix.md)
 
-## Fast Invariants
+Skills (`.agents/skills/`):
 
-- Default model: `openai/gpt-5.3-codex`
-- `thinking_mode` default: `true`
-- `request_id` max length: `256`
-- Auto `agent_mode` when omitted:
-  - on: qwen, glm, claude, codex, gemini
-  - off: kimi
-- All providers must stream real SSE (no fake full-response stream)
-- Do not silently rename SSE event names
-
-## Documentation Rule
-
-When behavior changes:
-
-- update shared docs in `docs/assistant/*`,
-- keep `AGENTS.md` and this file aligned as entry pages,
-- append a detailed entry to `CHANGELOG.md`,
-- update `README.md` if needed.
+- `code-change-verification` — verification commands and scripts
+- `docs-sync` — documentation coverage audit
+- `final-release-review` — release-readiness review
+- `implementation-strategy` — compatibility boundary decisions

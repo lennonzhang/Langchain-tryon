@@ -1,25 +1,17 @@
 # Validation and Release Checklist
 
-**Purpose:** Standard verification and documentation checklist for safe changes.  
+**Purpose:** Standard verification and documentation checklist for safe changes.
 **When to read:** Before merge or release, especially for behavior or contract changes.
 
-## Validation Commands
+## Validation
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-cd frontend-react
-pnpm test
-pnpm test:e2e
-pnpm run build
-```
+Run `$code-change-verification` or execute manually — see [`.agents/skills/code-change-verification/SKILL.md`](../../.agents/skills/code-change-verification/SKILL.md).
 
 ## Behavior-Change Checklist
 
 - Update tests for changed behavior.
-- Update shared assistant docs under `docs/assistant/*`.
-- Keep `AGENTS.md` and `CLAUDE.md` as thin entry pages with correct links.
+- Run `$docs-sync` or manually update docs — see [`.agents/skills/docs-sync/SKILL.md`](../../.agents/skills/docs-sync/SKILL.md).
 - Add a detailed `CHANGELOG.md` entry.
-- Update `README.md` if user-facing behavior changed.
 - Verify markdown code blocks still render wrapper UI, support copy interaction, and highlight after stream completion.
 - Verify `+ New Chat` draft mode does not show previous session messages and preserves unsent draft across session switches.
 - Verify composer submit button switches to `Stop` only for the active running session; other sessions remain send-disabled.
@@ -43,6 +35,10 @@ pnpm run build
 - Provider routing and model policy remain registry-driven.
 - Provider timeout precedence remains documented and tested: `<PROVIDER>_TIMEOUT_SECONDS` -> `MODEL_TIMEOUT_SECONDS` -> default.
 - If `<PROVIDER>_SSL_VERIFY=false`, warning logging behavior remains intentional and tested.
+
+## Release Review
+
+Run `$final-release-review` before releases — see [`.agents/skills/final-release-review/SKILL.md`](../../.agents/skills/final-release-review/SKILL.md).
 
 ## Related
 
