@@ -110,13 +110,16 @@ Local shutdown behavior:
 - first `Ctrl+C` rejects new chat requests, cancels active streaming requests, and waits up to `SHUTDOWN_CANCEL_DRAIN_SECONDS` before exiting
 - second `Ctrl+C` forces immediate exit
 
-Enable stream debug logs:
+Enable chat lifecycle logs:
 
 ```powershell
-python server.py --debug-stream
+python server.py --chat-log-level INFO    # LLM send/recv, tool calls with message content
+python server.py --chat-log-level DEBUG   # above + SSE event summaries + request lifecycle
 ```
 
-When enabled, the backend prints event-level summaries (`request_id`, resolved model, event type, token/reasoning length, and truncated previews).
+When enabled, the backend prints structured lifecycle logs including LLM request/response content, tool call arguments and results, timing, and error details. The log level can also be set via `CHAT_LOG_LEVEL` or `LOG_LEVEL` environment variables (CLI takes priority).
+
+Logs are also written to `logs/latest.log` (overwritten each server restart).
 
 Open `http://127.0.0.1:8000`.
 

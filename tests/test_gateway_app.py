@@ -15,7 +15,6 @@ from backend.gateway.app import app
 class TestGatewayApp(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
-        app.state.debug_stream = False
         app.state.shutdown_requested = False
         self._too_long_request_id = "r" * 257
         self._api_key_patcher = patch("backend.gateway.app._gateway_api_key", return_value="test-api-key")
@@ -219,33 +218,6 @@ class TestGatewayApp(unittest.TestCase):
         response = self.client.post("/api/chat/stream", json={"message": "hello", "request_id": "rid-shutdown-stream"})
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {"error": "Server shutting down"})
-
-    def test_chat_route_forwards_debug_stream_flag(self):
-        payload = {"message": "hello", "request_id": "rid-debug"}
-        app.state.debug_stream = True
-        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
-            gate.slot.return_value.__aenter__ = AsyncMock(return_value=None)
-            gate.slot.return_value.__aexit__ = AsyncMock(return_value=False)
-            with patch("backend.gateway.app._gateway_api_key", return_value="test-key"):
-                with patch("backend.gateway.app.chat_once", return_value="ok") as chat_once_mock:
-                    response = self.client.post("/api/chat", json=payload)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"answer": "ok"})
-        self.assertTrue(chat_once_mock.call_args.kwargs["debug_stream"])
-        self.assertEqual(chat_once_mock.call_args.args[0], "test-key")
-
-    def test_chat_stream_forwards_debug_stream_flag(self):
-        payload = {"message": "hello", "request_id": "rid-stream-debug"}
-        app.state.debug_stream = True
-        with patch.object(gateway_app_module, "_ADMISSION_GATE") as gate:
-            gate.acquire = AsyncMock(return_value=None)
-            gate.release = AsyncMock(return_value=None)
-            with patch("backend.gateway.app._gateway_api_key", return_value="test-key"):
-                with patch("backend.gateway.app.stream_chat", return_value=iter([{"type": "done", "finish_reason": "stop"}])) as stream_chat_mock:
-                    response = self.client.post("/api/chat/stream", json=payload)
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(stream_chat_mock.call_args.kwargs["debug_stream"])
-        self.assertEqual(stream_chat_mock.call_args.args[0], "test-key")
 
     def test_chat_route_runtime_error_still_maps_to_502(self):
         payload = {"message": "hello", "request_id": "rid-runtime-error"}

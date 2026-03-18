@@ -3,8 +3,13 @@ import signal
 import threading
 
 
-def run(debug_stream: bool = False) -> None:
+def run(chat_log_level: str | None = None) -> None:
     import logging
+
+    from .chat_logger import attach_file_handler, configure_chat_logging
+    from .settings.env_loader import load_env_file
+
+    load_env_file()
 
     try:
         import uvicorn
@@ -18,17 +23,26 @@ def run(debug_stream: bool = False) -> None:
     port = int(os.getenv("PORT", "8000"))
     drain_timeout = _shutdown_cancel_drain_seconds()
     graceful_timeout = max(3, int(drain_timeout) + 1)
-    if debug_stream:
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    app.state.debug_stream = bool(debug_stream)
+
+    # Always configure root logging; level from LOG_LEVEL env or INFO when chat logging is active
+    root_level_name = os.getenv("LOG_LEVEL", "WARNING").strip().upper()
+    if chat_log_level and chat_log_level.strip().upper() in ("DEBUG", "INFO"):
+        root_level_name = "INFO"
+    logging.basicConfig(
+        level=getattr(logging, root_level_name, logging.WARNING),
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+
+    configure_chat_logging(chat_log_level)
+    attach_file_handler()
     app.state.shutdown_requested = False
-    mode = "on" if debug_stream else "off"
-    print(f"Serving on http://{host}:{port} (debug-stream: {mode})")
+    print(f"Serving on http://{host}:{port}")
     config = uvicorn.Config(
         app,
         host=host,
         port=port,
         timeout_graceful_shutdown=graceful_timeout,
+        log_config=None,
     )
     server = GracefulCancelServer(
         config=config,

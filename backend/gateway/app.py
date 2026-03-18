@@ -23,7 +23,6 @@ _FRONTEND_DIST_ROOT = FRONTEND_DIST_DIR.resolve()
 
 app = FastAPI()
 _ADMISSION_GATE = AdmissionGate.from_env()
-app.state.debug_stream = False
 app.state.shutdown_requested = False
 _MAX_JSON_BODY = 10 * 1024 * 1024
 _MAX_REQUEST_ID_CHARS = ChatRequest._MAX_REQUEST_ID_CHARS
@@ -216,7 +215,6 @@ async def post_chat(request: Request):
                 thinking_mode=req.thinking_mode,
                 images=req.images,
                 request_id=req.request_id,
-                debug_stream=bool(getattr(app.state, "debug_stream", False)),
             )
     except GatewayConfigurationError as exc:
         return _json_error(500, str(exc))
@@ -275,7 +273,6 @@ async def post_chat_stream(request: Request):
             thinking_mode=req.thinking_mode,
             images=req.images,
             request_id=req.request_id,
-            debug_stream=bool(getattr(app.state, "debug_stream", False)),
         )
 
     async def generate():

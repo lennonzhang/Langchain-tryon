@@ -30,6 +30,8 @@ def run_agent(
     event_emitter=None,
     emit_reasoning: bool = False,
     cancel_token=None,
+    request_id: str = "",
+    provider: str = "",
 ) -> None:
     """Run the LangGraph agent loop.
 
@@ -62,6 +64,8 @@ def run_agent(
         thinking_mode=thinking_mode,
         emit_reasoning=emit_reasoning,
         event_emitter=_emit,
+        request_id=request_id,
+        provider=provider,
     )
 
     # Assemble initial messages

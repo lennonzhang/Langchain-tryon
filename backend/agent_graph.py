@@ -10,6 +10,7 @@ Builds a ``StateGraph`` that supports:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Annotated, Any, Callable, TypedDict
 
 from langchain_core.messages import (
@@ -22,6 +23,7 @@ from langchain_core.messages import (
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
+from .chat_logger import log_llm_recv, log_llm_send, log_tool_call, log_tool_result
 from .message_builder import extract_text, history_as_messages
 from .model_profile import stream_or_invoke_kwargs
 from .tools_registry import normalize_request_user_input_args
@@ -92,6 +94,8 @@ def build_agent_graph(
     thinking_mode: bool,
     emit_reasoning: bool,
     event_emitter: Callable[[dict], None] | None = None,
+    request_id: str = "",
+    provider: str = "",
 ):
     """Compile and return the LangGraph agent graph.
 
@@ -109,6 +113,10 @@ def build_agent_graph(
         Whether to emit ``reasoning`` events.
     event_emitter:
         Callback to push SSE events (e.g. ``queue.put``).
+    request_id:
+        Request ID for logging correlation.
+    provider:
+        Provider name for logging (e.g. ``"openai"``).
     """
     invoke_kwargs = stream_or_invoke_kwargs(model, thinking_mode)
     llm_with_tools = client.bind_tools(tools) if tools else client
@@ -131,7 +139,18 @@ def build_agent_graph(
             return {}
 
         plan_messages = _with_leading_system(state["messages"], _PLAN_PROMPT)
+        log_llm_send(
+            rid=request_id, model=model, provider=provider,
+            messages=plan_messages, tools=tools,
+            thinking=thinking_mode, agent_step=0,
+        )
+        t0 = time.monotonic()
         response = llm_with_tools.invoke(plan_messages, **invoke_kwargs)
+        elapsed = (time.monotonic() - t0) * 1000
+        log_llm_recv(
+            rid=request_id, model=model, provider=provider,
+            response=response, elapsed_ms=elapsed, agent_step=0,
+        )
         _extract_reasoning(response)
         plan_text = extract_text(getattr(response, "content", ""))
         if plan_text:
@@ -146,7 +165,18 @@ def build_agent_graph(
             "max_steps": state["max_steps"],
         })
 
+        log_llm_send(
+            rid=request_id, model=model, provider=provider,
+            messages=state["messages"], tools=tools,
+            thinking=thinking_mode, agent_step=step,
+        )
+        t0 = time.monotonic()
         response = llm_with_tools.invoke(state["messages"], **invoke_kwargs)
+        elapsed = (time.monotonic() - t0) * 1000
+        log_llm_recv(
+            rid=request_id, model=model, provider=provider,
+            response=response, elapsed_ms=elapsed, agent_step=step,
+        )
         _extract_reasoning(response)
 
         tool_calls = getattr(response, "tool_calls", None) or []
@@ -213,14 +243,27 @@ def build_agent_graph(
                 "step": step,
             })
 
+            log_tool_call(rid=request_id, tool_name=tool_name, tool_args=tool_args, step=step)
+
             tool_fn = tools_by_name.get(tool_name)
+            t0 = time.monotonic()
             if tool_fn is None:
                 result = f"Unknown tool: {tool_name}"
+                success = False
             else:
                 try:
                     result = tool_fn.invoke(tool_args)
+                    success = True
                 except Exception as exc:  # noqa: BLE001
                     result = f"Tool error: {exc}"
+                    success = False
+            elapsed = (time.monotonic() - t0) * 1000
+
+            log_tool_result(
+                rid=request_id, tool_name=tool_name,
+                output=str(result), success=success,
+                elapsed_ms=elapsed, step=step,
+            )
 
             display = result[:500] if isinstance(result, str) else str(result)[:500]
             _emit({
@@ -252,7 +295,17 @@ def build_agent_graph(
             return {}
 
         reflect_messages = _with_leading_system(state["messages"], _REFLECT_PROMPT)
+        log_llm_send(
+            rid=request_id, model=model, provider=provider,
+            messages=reflect_messages, thinking=thinking_mode, agent_step=step,
+        )
+        t0 = time.monotonic()
         response = client.invoke(reflect_messages, **invoke_kwargs)
+        elapsed = (time.monotonic() - t0) * 1000
+        log_llm_recv(
+            rid=request_id, model=model, provider=provider,
+            response=response, elapsed_ms=elapsed, agent_step=step,
+        )
         _extract_reasoning(response)
         reflect_text = extract_text(getattr(response, "content", ""))
         if reflect_text:
@@ -272,23 +325,42 @@ def build_agent_graph(
 
         # Stream final answer token-by-token (no tools bound)
         stream_kwargs = stream_or_invoke_kwargs(model, thinking_mode)
+        log_llm_send(
+            rid=request_id, model=model, provider=provider,
+            messages=messages, thinking=thinking_mode,
+            agent_step=state["step_count"],
+        )
+        t0 = time.monotonic()
         has_tokens = False
+        collected_content: list[str] = []
+        collected_reasoning: list[str] = []
         for chunk in client.stream(messages, **stream_kwargs):
             additional = getattr(chunk, "additional_kwargs", {}) or {}
             reasoning = additional.get("reasoning_content")
             if emit_reasoning and isinstance(reasoning, str) and reasoning:
                 _emit({"type": "reasoning", "content": reasoning})
+                collected_reasoning.append(reasoning)
 
             token = extract_text(getattr(chunk, "content", ""))
             if token:
                 has_tokens = True
+                collected_content.append(token)
                 _emit({"type": "token", "content": token})
 
+        elapsed = (time.monotonic() - t0) * 1000
         if not has_tokens:
             _emit({
                 "type": "token",
                 "content": "(The agent did not produce a final answer. Please try again.)",
             })
+
+        log_llm_recv(
+            rid=request_id, model=model, provider=provider,
+            content="".join(collected_content),
+            reasoning="".join(collected_reasoning) if collected_reasoning else None,
+            elapsed_ms=elapsed,
+            agent_step=state["step_count"],
+        )
 
         return {"final_streamed": True}
 

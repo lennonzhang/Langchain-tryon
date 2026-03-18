@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 
+from backend.chat_logger import log_request_lifecycle
 from backend.domain.execution import (
     CancellationRegistry,
     ChatExecutionContext,
@@ -63,7 +64,6 @@ class ChatOnceUseCase:
         thinking_mode: bool,
         images: list[str] | None,
         request_id: str,
-        debug_stream: bool = False,
     ) -> str:
         resolved_model = self._deps.resolve_model(model)
         token = self._deps.registry.register(request_id, kind="once")
@@ -76,7 +76,10 @@ class ChatOnceUseCase:
             agent_mode=agent_mode,
             enable_search=enable_search,
             cancel_token=token,
-            debug_stream=debug_stream,
+        )
+        log_request_lifecycle(
+            rid=ctx.request_id, model=ctx.resolved_model, evt="once_start",
+            agent_mode=ctx.agent_mode, thinking=ctx.thinking_mode,
         )
         try:
             client = self._deps.build_chat_model(
@@ -109,6 +112,8 @@ class ChatOnceUseCase:
                         search_provider=search_provider,
                         event_emitter=collect,
                         cancel_token=ctx.cancel_token,
+                        request_id=ctx.request_id,
+                        provider=ctx.provider,
                     )
                 if clarification_question:
                     return clarification_question
@@ -127,6 +132,7 @@ class ChatOnceUseCase:
                 response = client.invoke(messages, **stream_or_invoke_kwargs(ctx.resolved_model, ctx.thinking_mode))
             return extract_text(getattr(response, "content", ""))
         finally:
+            log_request_lifecycle(rid=ctx.request_id, model=ctx.resolved_model, evt="once_done")
             self._deps.registry.finish(request_id, token)
 
 
@@ -146,7 +152,6 @@ class StreamChatUseCase:
         thinking_mode: bool,
         images: list[str] | None,
         request_id: str,
-        debug_stream: bool = False,
     ) -> SseEventStream:
         resolved_model = self._deps.resolve_model(model)
         token = self._deps.registry.register(request_id, kind="stream")
@@ -159,7 +164,6 @@ class StreamChatUseCase:
             agent_mode=agent_mode,
             enable_search=enable_search,
             cancel_token=token,
-            debug_stream=debug_stream,
         )
         sink = EventSink(cancel_token=token)
         worker = threading.Thread(
@@ -178,6 +182,10 @@ class StreamChatUseCase:
         return SseEventStream(sink, cancel_token=token)
 
     def _produce_events(self, *, sink: EventSink, ctx: ChatExecutionContext, api_key: str, message: str, history: list, images):
+        log_request_lifecycle(
+            rid=ctx.request_id, model=ctx.resolved_model, evt="stream_start",
+            agent_mode=ctx.agent_mode, thinking=ctx.thinking_mode,
+        )
         try:
             client = self._deps.build_chat_model(
                 api_key,
@@ -197,6 +205,8 @@ class StreamChatUseCase:
                     run_agent=self._deps.run_agent,
                     cancel_token=ctx.cancel_token,
                     event_sink=sink,
+                    request_id=ctx.request_id,
+                    provider=ctx.provider,
                 ):
                     if event.get("type") == "done":
                         terminal_seen = True
@@ -227,6 +237,8 @@ class StreamChatUseCase:
                 thinking_mode=ctx.thinking_mode,
                 emit_reasoning=catalog.supports(ctx.resolved_model, "thinking") and bool(ctx.thinking_mode),
                 cancel_token=ctx.cancel_token,
+                request_id=ctx.request_id,
+                provider=ctx.provider,
             ):
                 if event.get("type") == "done":
                     terminal_seen = True
@@ -240,6 +252,7 @@ class StreamChatUseCase:
                 sink.emit({"type": "error", "error": str(exc)})
                 sink.emit({"type": "done", "finish_reason": "error"})
         finally:
+            log_request_lifecycle(rid=ctx.request_id, model=ctx.resolved_model, evt="stream_done")
             self._deps.registry.finish(ctx.request_id, ctx.cancel_token)
             sink.close()
 

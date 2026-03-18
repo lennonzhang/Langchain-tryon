@@ -7,6 +7,7 @@ import queue
 import threading
 import time
 
+from .chat_logger import log_llm_recv, log_llm_send
 from .message_builder import (
     build_messages,
     context_usage_payload,
@@ -32,6 +33,8 @@ def stream_agentic(
     run_react_agent=None,
     cancel_token=None,
     event_sink=None,
+    request_id: str = "",
+    provider: str = "",
 ):
     """Yield SSE events for the agentic flow using a background thread."""
     if run_web_search is None:
@@ -71,6 +74,8 @@ def stream_agentic(
                     event_emitter=_emit_from_agent,
                     emit_reasoning=emit_reasoning,
                     cancel_token=cancel_token,
+                    request_id=request_id,
+                    provider=provider,
                 )
         except Exception as exc:  # noqa: BLE001
             state["error"] = exc
@@ -136,18 +141,27 @@ def stream_direct(
     thinking_mode: bool,
     emit_reasoning: bool,
     cancel_token=None,
+    request_id: str = "",
+    provider: str = "",
 ):
     """Yield SSE events for the direct (non-agent) streaming flow."""
     stream_kwargs = stream_or_invoke_kwargs(model, thinking_mode)
 
     has_tokens = False
     emitted_tokens: list[str] = []
+    collected_reasoning: list[str] = []
 
     with proxy_env_guard():
         yield {
             "type": "context_usage",
             "usage": context_usage_payload(model, "single", messages),
         }
+
+        log_llm_send(
+            rid=request_id, model=model, provider=provider,
+            messages=messages, thinking=thinking_mode,
+        )
+        t0 = time.monotonic()
 
         stream = client.stream(messages, **stream_kwargs)
         try:
@@ -158,6 +172,7 @@ def stream_direct(
                 reasoning = additional.get("reasoning_content")
                 if emit_reasoning and isinstance(reasoning, str) and reasoning:
                     yield {"type": "reasoning", "content": reasoning}
+                    collected_reasoning.append(reasoning)
 
                 token = extract_text(getattr(chunk, "content", ""))
                 if token:
@@ -171,7 +186,16 @@ def stream_direct(
                     close()
                 except Exception:  # noqa: BLE001
                     logger.warning("Failed to close provider stream cleanly", exc_info=True)
+
+    elapsed = (time.monotonic() - t0) * 1000
+
     if cancel_token is not None and cancel_token.cancelled:
+        log_llm_recv(
+            rid=request_id, model=model, provider=provider,
+            content="".join(emitted_tokens),
+            reasoning="".join(collected_reasoning) if collected_reasoning else None,
+            elapsed_ms=elapsed,
+        )
         yield {"type": "done", "finish_reason": "stop"}
         return
 
@@ -182,6 +206,13 @@ def stream_direct(
             "content": fallback,
         }
         emitted_tokens.append(fallback)
+
+    log_llm_recv(
+        rid=request_id, model=model, provider=provider,
+        content="".join(emitted_tokens),
+        reasoning="".join(collected_reasoning) if collected_reasoning else None,
+        elapsed_ms=elapsed,
+    )
 
     yield {
         "type": "context_usage",

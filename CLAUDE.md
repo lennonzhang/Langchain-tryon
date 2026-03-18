@@ -31,6 +31,12 @@ Default endpoint: `POST /api/chat/stream`.
   - verify `python server.py` is using the graceful shutdown path and check `SHUTDOWN_CANCEL_DRAIN_SECONDS`
 - Cross-session stream bleed:
   - verify frontend isolation by `sessionId + requestId`
+- Debug LLM interactions (what was sent/received, tool calls):
+  - run `python server.py --chat-log-level INFO` for full lifecycle logs with message content
+  - or set `CHAT_LOG_LEVEL=INFO` env var (CLI `--chat-log-level` takes priority)
+  - `DEBUG` level adds SSE event summaries and request lifecycle events
+  - logs also written to `logs/latest.log` (overwritten each restart)
+  - log module: `backend/chat_logger.py`
 - Web search timeout/failure:
   - check `SEARCH_BACKEND` and confirm Tavily is the active path by default
   - check `TAVILY_TIMEOUT_SECONDS` for search, then `TAVILY_EXTRACT_TIMEOUT_SECONDS` for Tavily Extract, then legacy timeout fallbacks (`WEB_SEARCH_TOTAL_BUDGET_SECONDS`, `WEB_LOADER_TIMEOUT_SECONDS`)

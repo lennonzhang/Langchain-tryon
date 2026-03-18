@@ -30,6 +30,7 @@ scripts/list_chatnvidia_models.py
 scripts/models-*.txt
 
 *.log
+logs/
 *.out
 *.err
 .DS_Store

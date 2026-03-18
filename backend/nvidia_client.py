@@ -138,7 +138,6 @@ def chat_once(
     thinking_mode: bool = True,
     images: list[str] | None = None,
     request_id: str = "chat-once",
-    debug_stream: bool = False,
 ) -> str:
     return ChatOnceUseCase(_deps()).execute(
         api_key=api_key,
@@ -150,7 +149,6 @@ def chat_once(
         thinking_mode=thinking_mode,
         images=images,
         request_id=request_id,
-        debug_stream=debug_stream,
     )
 
 
@@ -164,7 +162,6 @@ def stream_chat(
     thinking_mode: bool = True,
     images: list[str] | None = None,
     request_id: str = "stream-chat",
-    debug_stream: bool = False,
 ):
     stream = StreamChatUseCase(_deps()).execute(
         api_key=api_key,
@@ -176,7 +173,6 @@ def stream_chat(
         thinking_mode=thinking_mode,
         images=images,
         request_id=request_id,
-        debug_stream=debug_stream,
     )
     yield from stream.iter_events()
 

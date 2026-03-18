@@ -33,6 +33,9 @@
 - Tavily SSL verify env: `TAVILY_SSL_VERIFY` (default `true`)
 - Legacy search env fallbacks remain accepted during migration: `WEB_LOADER_TIMEOUT_SECONDS`, `WEB_SEARCH_TOTAL_BUDGET_SECONDS`, `WEB_LOADER_MAX_PAGES`, `WEB_LOADER_CONCURRENCY`
 - Local shutdown drain env: `SHUTDOWN_CANCEL_DRAIN_SECONDS` (default `2`)
+- Chat lifecycle log level env: `CHAT_LOG_LEVEL` (default `WARNING`; `INFO` for full lifecycle, `DEBUG` for SSE events)
+- General log level fallback env: `LOG_LEVEL` (default `WARNING`)
+- Chat lifecycle log file: `logs/latest.log` (overwritten each server restart)
 - `thinking_mode` default: `true`
 - Auto `agent_mode` when omitted:
   - enabled: qwen, glm, claude, codex, gemini
@@ -43,6 +46,7 @@
 ```bash
 # backend (repo root)
 python server.py
+python server.py --chat-log-level INFO    # enable chat lifecycle logging
 python -m unittest discover -s tests -v
 ```
 

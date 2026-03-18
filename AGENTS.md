@@ -28,6 +28,14 @@ L4 detailed references:
 
 - Error status matrix: [`docs/assistant/error-status-matrix.md`](docs/assistant/error-status-matrix.md)
 
+## Logging & Observability
+
+- Chat lifecycle logger: `backend/chat_logger.py`
+  - Controls: CLI `--chat-log-level INFO|DEBUG` or env `CHAT_LOG_LEVEL`
+  - Events: `[llm_send]` / `[llm_recv]` (with message content), `[tool_call]` / `[tool_result]`, `[llm_error]`, `[sse_event]`, `[lifecycle]`
+  - File output: `logs/latest.log` (overwritten each server restart, git-ignored)
+  - Only activated via `server.py` startup path — Vercel serverless and tests are unaffected
+
 Skills (`.agents/skills/`):
 
 - `code-change-verification` — run `$code-change-verification` after code changes

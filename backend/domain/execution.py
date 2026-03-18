@@ -112,7 +112,6 @@ class ChatExecutionContext:
     agent_mode: bool | None
     enable_search: bool
     cancel_token: CancellationToken
-    debug_stream: bool = False
 
 
 class EventSink:

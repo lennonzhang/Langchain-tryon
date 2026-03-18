@@ -29,6 +29,7 @@
 - Search service orchestration used by chat use cases: `backend/application/search_service.py`
 - LangChain tools (`web_search`/`read_url` names unchanged; default implementations now use Tavily): `backend/tools_registry.py`
 - Request schema parsing (`ChatRequest`): `backend/schemas.py`
+- Chat lifecycle logging (LLM send/recv, tool call/result, SSE events): `backend/chat_logger.py`
 - `/api/chat` and `/api/chat/stream` compatibility handlers: `backend/chat_handlers.py`
 - FastAPI gateway routes: `backend/gateway/app.py`
 - Gateway admission control and queueing: `backend/gateway/admission.py`
