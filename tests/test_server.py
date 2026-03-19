@@ -1,4 +1,5 @@
 import signal
+import sys
 import types
 import unittest
 from unittest.mock import Mock, patch
@@ -49,7 +50,8 @@ class TestGracefulCancelServer(unittest.TestCase):
     def _build_server(self, callback):
         app = types.SimpleNamespace(state=types.SimpleNamespace(shutdown_requested=False))
         logger = Mock()
-        with patch("uvicorn.Server", FakeUvicornServer):
+        fake_uvicorn = types.SimpleNamespace(Server=FakeUvicornServer)
+        with patch.dict(sys.modules, {"uvicorn": fake_uvicorn}):
             server = server_module.GracefulCancelServer(
                 config=object(),
                 shutdown_cancel_drain_seconds=2.0,
@@ -134,7 +136,8 @@ class TestGracefulCancelServer(unittest.TestCase):
         callback = Mock(return_value={"active_streams_before": 0, "cancelled_streams": 0, "drained": True, "active_streams_after": 0})
         app = types.SimpleNamespace(state=types.SimpleNamespace(shutdown_requested=False))
         logger = Mock()
-        with patch("uvicorn.Server", FakeUvicornServerNoCapturedSignals):
+        fake_uvicorn = types.SimpleNamespace(Server=FakeUvicornServerNoCapturedSignals)
+        with patch.dict(sys.modules, {"uvicorn": fake_uvicorn}):
             server = server_module.GracefulCancelServer(
                 config=object(),
                 shutdown_cancel_drain_seconds=2.0,
@@ -179,3 +182,46 @@ class TestServerHelpers(unittest.TestCase):
             self.assertEqual(server_module._shutdown_cancel_drain_seconds(), 2.0)
         with patch.dict("os.environ", {"SHUTDOWN_CANCEL_DRAIN_SECONDS": "-5"}, clear=False):
             self.assertEqual(server_module._shutdown_cancel_drain_seconds(), 0.0)
+
+    def test_run_configures_logging_and_server(self):
+        fake_app = types.SimpleNamespace(state=types.SimpleNamespace(shutdown_requested=True))
+        config_mock = Mock(return_value="uvicorn-config")
+        fake_uvicorn = types.SimpleNamespace(Config=config_mock)
+        fake_gateway_app_module = types.SimpleNamespace(app=fake_app)
+        fake_nvidia_client_module = types.SimpleNamespace(cancel_active_streams_for_shutdown=Mock(return_value={}))
+        fake_env_loader_module = types.SimpleNamespace(load_env_file=Mock())
+        fake_server_instance = Mock()
+
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "uvicorn": fake_uvicorn,
+                    "backend.gateway.app": fake_gateway_app_module,
+                    "backend.nvidia_client": fake_nvidia_client_module,
+                    "backend.settings.env_loader": fake_env_loader_module,
+                },
+            ),
+            patch("backend.chat_logger.configure_chat_logging") as configure_log_mock,
+            patch("backend.chat_logger.attach_file_handler") as attach_handler_mock,
+            patch("backend.server.GracefulCancelServer", return_value=fake_server_instance) as server_cls_mock,
+            patch("logging.basicConfig") as basic_config_mock,
+            patch.dict("os.environ", {"LOG_LEVEL": "WARNING"}, clear=False),
+        ):
+            server_module.run(chat_log_level="INFO")
+
+        fake_env_loader_module.load_env_file.assert_called_once_with()
+        configure_log_mock.assert_called_once_with("INFO")
+        attach_handler_mock.assert_called_once_with()
+        basic_config_mock.assert_called_once()
+        self.assertEqual(basic_config_mock.call_args.kwargs["level"], 20)
+        config_mock.assert_called_once_with(
+            fake_app,
+            host="127.0.0.1",
+            port=8000,
+            timeout_graceful_shutdown=3,
+            log_config=None,
+        )
+        server_cls_mock.assert_called_once()
+        fake_server_instance.run.assert_called_once_with()
+        self.assertFalse(fake_app.state.shutdown_requested)

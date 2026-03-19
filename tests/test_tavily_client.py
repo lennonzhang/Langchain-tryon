@@ -221,6 +221,25 @@ class TestTavilyClient(unittest.TestCase):
         self.assertEqual(post_kwargs["timeout"], 50.0)
         self.assertEqual(post_kwargs["json"]["timeout"], 40.0)
 
+    def test_extract_default_client_timeout_keeps_buffer_over_api_timeout(self):
+        fake_response = Mock()
+        fake_response.json.return_value = {"results": [{"url": "https://a", "content": "hello"}]}
+        fake_response.raise_for_status.return_value = None
+        fake_client = Mock()
+        fake_client.post.return_value = fake_response
+        fake_client.is_closed = False
+
+        with (
+            patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-k"}, clear=False),
+            patch("backend.infrastructure.search.tavily_client.httpx.Client", return_value=fake_client),
+        ):
+            client = TavilyClient()
+            client.extract(["https://a"], api_timeout_seconds=40.0)
+
+        post_kwargs = fake_client.post.call_args.kwargs
+        self.assertEqual(post_kwargs["timeout"], 45.0)
+        self.assertEqual(post_kwargs["json"]["timeout"], 40.0)
+
     def test_post_translates_timeout(self):
         fake_client = Mock()
         fake_client.post.side_effect = httpx.TimeoutException("timeout")

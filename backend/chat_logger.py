@@ -64,9 +64,19 @@ def attach_file_handler(base_dir: Path | None = None) -> None:
     root = base_dir or Path(__file__).resolve().parents[1]
     log_dir = root / _LOG_DIR
     log_dir.mkdir(exist_ok=True)
-    log_path = log_dir / _LOG_FILE
+    log_path = (log_dir / _LOG_FILE).resolve()
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    for existing in logger.handlers:
+        if not isinstance(existing, logging.FileHandler):
+            continue
+        if Path(getattr(existing, "baseFilename", "")).resolve() != log_path:
+            continue
+        existing.setFormatter(formatter)
+        existing.setLevel(logger.level)
+        return
+
     handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    handler.setFormatter(formatter)
     handler.setLevel(logger.level)
     logger.addHandler(handler)
     logger.warning(

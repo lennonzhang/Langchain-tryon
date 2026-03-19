@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import threading
+import time
 
-from backend.chat_logger import log_request_lifecycle
+from backend.chat_logger import log_llm_recv, log_llm_send, log_request_lifecycle
 from backend.domain.execution import (
     CancellationRegistry,
     ChatExecutionContext,
@@ -129,7 +130,22 @@ class ChatOnceUseCase:
             normalized_images = normalize_media_data_urls(images)
             messages = build_messages(ctx.resolved_model, message, history, initial_search_context, normalized_images)
             with proxy_env_guard():
+                log_llm_send(
+                    rid=ctx.request_id,
+                    model=ctx.resolved_model,
+                    provider=ctx.provider,
+                    messages=messages,
+                    thinking=ctx.thinking_mode,
+                )
+                started = time.monotonic()
                 response = client.invoke(messages, **stream_or_invoke_kwargs(ctx.resolved_model, ctx.thinking_mode))
+            log_llm_recv(
+                rid=ctx.request_id,
+                model=ctx.resolved_model,
+                provider=ctx.provider,
+                response=response,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+            )
             return extract_text(getattr(response, "content", ""))
         finally:
             log_request_lifecycle(rid=ctx.request_id, model=ctx.resolved_model, evt="once_done")

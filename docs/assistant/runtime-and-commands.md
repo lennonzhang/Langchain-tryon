@@ -25,7 +25,7 @@
 - Search backend env: `SEARCH_BACKEND` (default `tavily`, `legacy` for deprecated fallback)
 - Tavily API key env: `TAVILY_API_KEY`
 - Tavily base URL env: `TAVILY_BASE_URL` (default `https://api.tavily.com`)
-- Tavily timeout env: `TAVILY_TIMEOUT_SECONDS` (default `15`)
+- Tavily search timeout env: `TAVILY_TIMEOUT_SECONDS` (default `15`)
 - Tavily search depth env: `TAVILY_SEARCH_DEPTH` (default `basic`)
 - Tavily extract depth env: `TAVILY_EXTRACT_DEPTH` (default `basic`)
 - Tavily extract API timeout env: `TAVILY_EXTRACT_TIMEOUT_SECONDS` (default `30`)
@@ -55,6 +55,10 @@ Search backend notes:
 - default runtime path is Tavily Search + Tavily Extract
 - `SEARCH_BACKEND=legacy` temporarily restores the deprecated DuckDuckGo + local page loader path
 - `web_search` / `read_url` tool names and SSE search events remain unchanged across both paths
+- Tavily timeout semantics are split:
+  - `TAVILY_TIMEOUT_SECONDS` controls Tavily Search default timeout
+  - `TAVILY_EXTRACT_TIMEOUT_SECONDS` controls Tavily Extract API timeout
+  - `WEB_SEARCH_TOTAL_BUDGET_SECONDS` is the end-to-end search + extract budget when configured
 - `WEB_LOADER_CONCURRENCY` remains a legacy compatibility knob; Tavily-backed search ignores it
 - Tavily Extract passes the API-side `timeout` body field and logs request ids / response times / partial failures for troubleshooting
 

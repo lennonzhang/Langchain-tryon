@@ -52,6 +52,13 @@ OPENAI_SSE_READ_TIMEOUT_SECONDS=600
 SHUTDOWN_CANCEL_DRAIN_SECONDS=2
 ```
 
+Search timeout semantics:
+
+- `TAVILY_TIMEOUT_SECONDS`: Tavily Search default timeout
+- `TAVILY_EXTRACT_TIMEOUT_SECONDS`: Tavily Extract API timeout
+- `WEB_SEARCH_TOTAL_BUDGET_SECONDS`: optional end-to-end budget across Tavily search + extract
+- `WEB_LOADER_TIMEOUT_SECONDS`: legacy page-loader timeout fallback and `read_url` compatibility fallback
+
 Visible model lists (optional, but required if you pin `*_MODELS` in `.env`):
 
 ```env
@@ -117,7 +124,7 @@ python server.py --chat-log-level INFO    # LLM send/recv, tool calls with messa
 python server.py --chat-log-level DEBUG   # above + SSE event summaries + request lifecycle
 ```
 
-When enabled, the backend prints structured lifecycle logs including LLM request/response content, tool call arguments and results, timing, and error details. The log level can also be set via `CHAT_LOG_LEVEL` or `LOG_LEVEL` environment variables (CLI takes priority).
+When enabled, the backend prints structured lifecycle logs for both `/api/chat` and `/api/chat/stream`, including LLM request/response content, tool call arguments and results, timing, and error details. The log level can also be set via `CHAT_LOG_LEVEL` or `LOG_LEVEL` environment variables (CLI takes priority).
 
 Logs are also written to `logs/latest.log` (overwritten each server restart).
 

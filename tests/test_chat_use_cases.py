@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from backend.application.chat_use_cases import ChatOnceUseCase, ChatUseCaseDependencies, StreamChatUseCase
 from backend.application.search_service import SearchService
@@ -105,6 +105,71 @@ class TestChatUseCases(unittest.TestCase):
         )
 
         self.assertEqual(answer, "Which cloud provider should I target?")
+
+    def test_chat_once_direct_path_logs_llm_send_and_recv(self):
+        search_service = Mock(spec=SearchService)
+        search_service.search_with_events.return_value = ("search context", [{"title": "r1"}])
+        deps = ChatUseCaseDependencies(
+            run_web_search=Mock(),
+            run_agent=Mock(),
+            build_chat_model=Mock(return_value=_FakeClient()),
+            resolve_model=Mock(return_value="moonshotai/kimi-k2.5"),
+            search_service=search_service,
+        )
+
+        with (
+            patch("backend.application.chat_use_cases.log_llm_send") as send_log_mock,
+            patch("backend.application.chat_use_cases.log_llm_recv") as recv_log_mock,
+        ):
+            answer = ChatOnceUseCase(deps).execute(
+                api_key="api-key",
+                message="question",
+                history=[],
+                model="moonshotai/kimi-k2.5",
+                enable_search=True,
+                agent_mode=False,
+                thinking_mode=False,
+                images=[],
+                request_id="rid-direct-logs",
+            )
+
+        self.assertEqual(answer, "final answer")
+        send_log_mock.assert_called_once()
+        recv_log_mock.assert_called_once()
+        self.assertEqual(send_log_mock.call_args.kwargs["rid"], "rid-direct-logs")
+        self.assertEqual(recv_log_mock.call_args.kwargs["rid"], "rid-direct-logs")
+
+    def test_chat_once_agentic_path_does_not_duplicate_direct_llm_logs(self):
+        def _run_agent(event_emitter=None, **kwargs):
+            _ = kwargs
+            event_emitter({"type": "token", "content": "agent answer"})
+
+        deps = ChatUseCaseDependencies(
+            run_web_search=Mock(),
+            run_agent=_run_agent,
+            build_chat_model=Mock(return_value=_FakeClient()),
+            resolve_model=Mock(return_value="openai/gpt-5.3-codex"),
+        )
+
+        with (
+            patch("backend.application.chat_use_cases.log_llm_send") as send_log_mock,
+            patch("backend.application.chat_use_cases.log_llm_recv") as recv_log_mock,
+        ):
+            answer = ChatOnceUseCase(deps).execute(
+                api_key="api-key",
+                message="question",
+                history=[],
+                model="openai/gpt-5.3-codex",
+                enable_search=False,
+                agent_mode=True,
+                thinking_mode=False,
+                images=[],
+                request_id="rid-agentic-logs",
+            )
+
+        self.assertEqual(answer, "agent answer")
+        send_log_mock.assert_not_called()
+        recv_log_mock.assert_not_called()
 
 
 if __name__ == "__main__":

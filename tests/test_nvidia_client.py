@@ -120,8 +120,8 @@ class TestNvidiaClient(unittest.TestCase):
             "question",
             num_results=5,
             include_page_content=True,
-            page_timeout_s=8.5,
-            total_budget_s=8.5,
+            page_timeout_s=2.5,
+            total_budget_s=5.5,
             max_pages=2,
             concurrency=None,
         )
@@ -150,7 +150,7 @@ class TestNvidiaClient(unittest.TestCase):
             num_results=5,
             include_page_content=True,
             page_timeout_s=40.0,
-            total_budget_s=12.0,
+            total_budget_s=5.5,
             max_pages=2,
             concurrency=None,
         )

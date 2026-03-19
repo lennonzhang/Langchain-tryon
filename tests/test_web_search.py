@@ -19,6 +19,7 @@ class TestLoadWebpageContent(unittest.TestCase):
             timeout_seconds=35.0,
             api_timeout_seconds=30.0,
         )
+        client.close.assert_called_once_with()
 
     def test_load_webpage_content_uses_tavily_timeout_env_by_default(self):
         client = Mock()
@@ -35,6 +36,7 @@ class TestLoadWebpageContent(unittest.TestCase):
             timeout_seconds=35.0,
             api_timeout_seconds=30.0,
         )
+        client.close.assert_called_once_with()
 
     def test_load_webpage_content_uses_legacy_when_backend_is_legacy(self):
         with (
@@ -58,6 +60,19 @@ class TestLoadWebpageContent(unittest.TestCase):
             content = load_webpage_content("https://example.com", max_chars=200)
 
         self.assertEqual(content, "")
+        client.close.assert_called_once_with()
+
+    def test_load_webpage_content_closes_client_on_extract_failure(self):
+        client = Mock()
+        client.extract.side_effect = RuntimeError("boom")
+
+        with (
+            patch("backend.web_search.TavilyClient", return_value=client),
+            self.assertRaisesRegex(RuntimeError, "boom"),
+        ):
+            load_webpage_content("https://example.com", max_chars=200)
+
+        client.close.assert_called_once_with()
 
 
 class TestWebSearch(unittest.TestCase):
@@ -96,6 +111,7 @@ class TestWebSearch(unittest.TestCase):
             timeout_seconds=35.0,
             api_timeout_seconds=30.0,
         )
+        client.close.assert_called_once_with()
 
     def test_web_search_skips_extract_when_include_page_content_is_false(self):
         client = Mock()
@@ -113,6 +129,7 @@ class TestWebSearch(unittest.TestCase):
 
         self.assertEqual(results[0]["title"], "T1")
         client.extract.assert_not_called()
+        client.close.assert_called_once_with()
 
     def test_web_search_respects_max_pages_for_extract(self):
         client = Mock()
@@ -134,6 +151,7 @@ class TestWebSearch(unittest.TestCase):
             timeout_seconds=35.0,
             api_timeout_seconds=30.0,
         )
+        client.close.assert_called_once_with()
 
     def test_web_search_dedupes_urls_before_extract(self):
         client = Mock()
@@ -154,6 +172,7 @@ class TestWebSearch(unittest.TestCase):
         )
         self.assertEqual(results[0]["content"], "same text")
         self.assertEqual(results[2]["content"], "other text")
+        client.close.assert_called_once_with()
 
     def test_web_search_extract_failure_returns_search_only_results(self):
         client = Mock()
@@ -169,6 +188,7 @@ class TestWebSearch(unittest.TestCase):
             results,
             [{"title": "T1", "url": "https://a", "snippet": "S1", "source_domain": "a"}],
         )
+        client.close.assert_called_once_with()
 
     def test_web_search_raises_when_tavily_search_fails(self):
         client = Mock()
@@ -179,6 +199,8 @@ class TestWebSearch(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "boom"),
         ):
             web_search("hello", num_results=3)
+
+        client.close.assert_called_once_with()
 
     def test_web_search_uses_legacy_when_backend_is_legacy(self):
         with (
@@ -198,23 +220,43 @@ class TestWebSearch(unittest.TestCase):
             concurrency=2,
         )
 
-    def test_web_search_extract_uses_independent_timeout(self):
+    def test_web_search_uses_remaining_budget_for_extract(self):
         client = Mock()
         client.search.return_value = [
             {"title": "T1", "url": "https://a", "snippet": "S1", "source_domain": "a"}
         ]
         client.extract.return_value = {"https://a": "page text"}
 
-        with patch("backend.web_search.TavilyClient", return_value=client):
-            web_search("hello", num_results=3)
+        with (
+            patch("backend.web_search.TavilyClient", return_value=client),
+            patch("backend.web_search.time.monotonic", side_effect=[10.0, 11.5]),
+        ):
+            web_search("hello", num_results=3, page_timeout_s=4.0, total_budget_s=5.0)
 
-        # Extract uses independent timeout (extract_timeout_seconds default=30),
-        # not remaining search budget
+        client.search.assert_called_once_with("hello", max_results=3, timeout_seconds=5.0)
         client.extract.assert_called_once_with(
             ["https://a"],
-            timeout_seconds=35.0,
-            api_timeout_seconds=30.0,
+            timeout_seconds=8.5,
+            api_timeout_seconds=3.5,
         )
+        client.close.assert_called_once_with()
+
+    def test_web_search_skips_extract_when_budget_is_exhausted(self):
+        client = Mock()
+        client.search.return_value = [
+            {"title": "T1", "url": "https://a", "snippet": "S1", "source_domain": "a"}
+        ]
+
+        with (
+            patch("backend.web_search.TavilyClient", return_value=client),
+            patch("backend.web_search.time.monotonic", side_effect=[0.0, 6.0]),
+        ):
+            results = web_search("hello", num_results=3, page_timeout_s=4.0, total_budget_s=5.0)
+
+        self.assertEqual(results[0]["title"], "T1")
+        client.search.assert_called_once_with("hello", max_results=3, timeout_seconds=5.0)
+        client.extract.assert_not_called()
+        client.close.assert_called_once_with()
 
     def test_web_search_prefers_explicit_timeouts(self):
         client = Mock()
@@ -225,6 +267,7 @@ class TestWebSearch(unittest.TestCase):
 
         client.search.assert_called_once_with("hello", max_results=5, timeout_seconds=5.5)
         client.extract.assert_not_called()
+        client.close.assert_called_once_with()
 
     def test_web_search_uses_extract_timeout_env_when_loading_page_content(self):
         client = Mock()
@@ -251,6 +294,7 @@ class TestWebSearch(unittest.TestCase):
             timeout_seconds=45.0,
             api_timeout_seconds=40.0,
         )
+        client.close.assert_called_once_with()
 
 
 class TestFormatSearchContext(unittest.TestCase):

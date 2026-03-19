@@ -1,28 +1,19 @@
 from __future__ import annotations
 
 import json
-import logging
 from urllib import error
 
-from .chat_logger import log_llm_error, log_request_lifecycle, log_sse_event
+from .chat_logger import log_llm_error, log_sse_event
 from .config import resolve_model
 from .http_utils import PayloadTooLargeError, init_sse, read_json_body, send_json, send_sse_event
 from .nvidia_client import cancel_chat, chat_once, stream_chat
 from .provider_event_normalizer import normalize_upstream_error, normalized_error_detail
 from .schemas import ChatRequest, ValidationError
 
-logger = logging.getLogger(__name__)
-
 
 def _is_gateway_timeout_error(exc: Exception) -> bool:
     detail = str(exc)
     return "504" in detail and "Gateway Timeout" in detail
-
-
-def _single_line_preview(value, limit: int = 80) -> str:
-    text = str(value or "")
-    collapsed = " ".join(text.split())
-    return collapsed[:limit]
 
 
 def handle_chat_once(handler, api_key: str) -> None:
@@ -44,10 +35,6 @@ def handle_chat_once(handler, api_key: str) -> None:
         send_json(handler, 400, {"error": "message is required"})
         return
     resolved_model = resolve_model(req.model)
-    log_request_lifecycle(
-        rid=req.request_id, model=resolved_model, evt="chat_once_start",
-        agent_mode=req.agent_mode, thinking=req.thinking_mode, web_search=req.enable_search,
-    )
 
     try:
         answer = chat_once(
@@ -112,10 +99,6 @@ def handle_chat_once(handler, api_key: str) -> None:
         )
         return
 
-    log_request_lifecycle(
-        rid=req.request_id, model=resolved_model, evt="chat_once_done",
-        answer_len=len(answer),
-    )
     send_json(handler, 200, {"answer": answer})
 
 
@@ -140,10 +123,6 @@ def handle_chat_stream(handler, api_key: str) -> None:
 
     rid = req.request_id
     resolved_model = resolve_model(req.model)
-    log_request_lifecycle(
-        rid=rid, model=resolved_model, evt="stream_start",
-        agent_mode=req.agent_mode, thinking=req.thinking_mode, web_search=req.enable_search,
-    )
     init_sse(handler)
 
     def _emit(payload: dict) -> None:

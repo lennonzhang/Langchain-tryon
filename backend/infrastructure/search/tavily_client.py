@@ -219,17 +219,17 @@ class TavilyClient:
         if not normalized_urls:
             return {}
 
+        has_explicit_api_timeout = api_timeout_seconds is not None and api_timeout_seconds > 0
+        has_explicit_client_timeout = timeout_seconds is not None and timeout_seconds > 0
         resolved_api_timeout = (
             api_timeout_seconds
-            if api_timeout_seconds is not None and api_timeout_seconds > 0
+            if has_explicit_api_timeout
             else self._settings.extract_timeout_seconds
         )
-        resolved_client_timeout = (
-            timeout_seconds
-            if timeout_seconds is not None and timeout_seconds > 0
-            else max(self._settings.timeout_seconds, resolved_api_timeout + 5.0)
-        )
-        resolved_client_timeout = max(resolved_client_timeout, resolved_api_timeout + 5.0)
+        if has_explicit_client_timeout:
+            resolved_client_timeout = float(timeout_seconds)
+        else:
+            resolved_client_timeout = max(self._settings.timeout_seconds, resolved_api_timeout + 5.0)
 
         logger.info(
             "Tavily extract start url_count=%d depth=%s client_timeout=%.1f api_timeout=%.1f ssl_verify=%s",

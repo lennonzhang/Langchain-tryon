@@ -2,6 +2,46 @@
 
 All notable changes to this repository are documented in this file.
 
+## 2026-03-19 (Tavily Timeout Semantics + Lifecycle Logging Coverage)
+
+### Summary
+
+Fixed Tavily timeout behavior so search timeout, extract timeout, and end-to-end budget are handled as separate concerns again, and completed chat lifecycle logging coverage for direct one-shot requests.
+
+### Backend
+
+- Updated `backend/web_search.py`:
+  - restored end-to-end budget handling for Tavily search by subtracting actual search elapsed time before extract
+  - split Tavily search timeout, extract timeout, and total budget semantics instead of conflating them
+  - removed dead `remaining` logic by making the remaining budget drive extract timeout decisions
+  - ensured `TavilyClient` is always closed in both `web_search()` and `load_webpage_content()`
+- Updated `backend/infrastructure/search/tavily_client.py`:
+  - explicit extract timeouts are now respected as passed by the caller
+  - default client timeout buffering still applies when the caller does not override it
+- Updated `backend/nvidia_client.py`:
+  - `page_timeout_s` now maps to extract/read-url timeout defaults only
+  - `total_budget_s` now maps to `WEB_SEARCH_TOTAL_BUDGET_SECONDS` instead of `TAVILY_TIMEOUT_SECONDS`
+- Updated `backend/application/chat_use_cases.py`:
+  - direct `/api/chat` requests now emit `llm_send` / `llm_recv`
+- Updated `backend/chat_handlers.py`:
+  - removed duplicate lifecycle start/done logging so request lifecycle logs come from use cases only
+- Updated `backend/chat_logger.py`:
+  - made `attach_file_handler()` idempotent for repeated startup calls targeting the same log path
+
+### Tests
+
+- Updated `tests/test_web_search.py` for remaining-budget semantics, Tavily client close coverage, and Tavily search/extract timeout separation
+- Updated `tests/test_nvidia_client.py` for corrected env-to-timeout mapping
+- Updated `tests/test_tavily_client.py` for explicit extract timeout handling
+- Updated `tests/test_chat_use_cases.py` to cover direct-path `llm_send` / `llm_recv` logging and no duplicate direct logging on agentic one-shot requests
+- Updated `tests/test_server.py` and added `tests/test_chat_logger.py` for logging configuration and file-handler behavior
+
+### Docs
+
+- Updated `README.md`
+- Updated `docs/assistant/runtime-and-commands.md`
+- Updated `.env.example`
+
 ## 2026-03-16 (Tavily-First Search Migration)
 
 ### Summary
