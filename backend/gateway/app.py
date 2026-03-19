@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
+from backend.auto_pm.api import router as auto_pm_router
 from backend.config import load_api_key
 from backend.domain.execution import DuplicateRequestIdError
 from backend.model_registry import capabilities_response
@@ -21,7 +22,8 @@ FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 _DEFAULT_FRONTEND_DIST_DIR = FRONTEND_DIST_DIR
 _FRONTEND_DIST_ROOT = FRONTEND_DIST_DIR.resolve()
 
-app = FastAPI()
+app = FastAPI(title="Auto-PM")
+app.include_router(auto_pm_router)
 _ADMISSION_GATE = AdmissionGate.from_env()
 app.state.shutdown_requested = False
 _MAX_JSON_BODY = 10 * 1024 * 1024

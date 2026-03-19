@@ -37,7 +37,7 @@ test.describe("chat visual regression", () => {
     await mockSseFromFixture(page, "stream-error.txt");
     await page.goto("/");
     await sendMessage(page, "show error");
-    await expect(page.getByText("Error: stream crashed")).toBeVisible();
+    await expect(page.getByTestId("messages-list").getByText("Error: stream crashed")).toBeVisible();
     await stabilizeForScreenshot(page);
     await expect(page.locator(".chat")).toHaveScreenshot("chat-error.png");
   });

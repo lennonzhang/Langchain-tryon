@@ -1,6 +1,16 @@
-# langchain-tryon maintenance
+# Auto-PM maintenance
 
-Repository maintenance and runbook for developers.
+Repository maintenance and runbook for Auto-PM developers.
+
+Auto-PM keeps the existing backend model/provider adaptation layer and adds a requirements-assistant workflow on top of it:
+
+- `POST /api/auto-pm/messages/ingest`
+- `POST /api/auto-pm/dingtalk/events`
+- `POST /api/auto-pm/knowledge/sync`
+- `POST /api/auto-pm/knowledge/dingtalk-project/live-fetch`
+- `GET /api/auto-pm/knowledge/tree`
+- `GET /api/auto-pm/gaps`
+- `POST /api/auto-pm/drafts/{id}/confirm`
 
 ## 1. Runtime Baseline
 
@@ -50,6 +60,13 @@ GATEWAY_QUEUE_TIMEOUT_SECONDS=15
 MODEL_TIMEOUT_SECONDS=300
 OPENAI_SSE_READ_TIMEOUT_SECONDS=600
 SHUTDOWN_CANCEL_DRAIN_SECONDS=2
+AUTO_PM_DATA_DIR=.auto_pm
+AUTO_PM_OWNER_ID=owner
+AUTO_PM_OWNER_NAME=Product Manager
+AUTO_PM_MODEL=openai/gpt-5.3-codex
+AUTO_PM_DINGTALK_PROJECT_ROOT=
+AUTO_PM_DINGTALK_PROJECT_IDS=
+AUTO_PM_WORKER_POLL_SECONDS=300
 ```
 
 Visible model lists (optional, but required if you pin `*_MODELS` in `.env`):
@@ -105,6 +122,12 @@ OpenAI Responses SSE read-idle timeout:
 python server.py
 ```
 
+Run one Auto-PM sync pass:
+
+```powershell
+python auto_pm_worker.py --once
+```
+
 Local shutdown behavior:
 
 - first `Ctrl+C` rejects new chat requests, cancels active streaming requests, and waits up to `SHUTDOWN_CANCEL_DRAIN_SECONDS` before exiting
@@ -135,6 +158,10 @@ For detailed rules, see [`docs/assistant/`](docs/assistant/):
 Key highlights:
 
 - Default chat path: `POST /api/chat/stream`; default model: `openai/gpt-5.3-codex`
+- Auto-PM path prefix: `/api/auto-pm/*`
+- Auto-PM knowledge sources: local Obsidian/Git directories plus DingTalk project document mirrors or live-fetched project docs
+- Auto-PM message scope: new private messages and group messages that explicitly mention the owner
+- Auto-PM output states: `answered`, `inferred`, `doc_gap`
 - Models: NVIDIA (kimi, qwen, glm), Anthropic (claude-sonnet-4-6), OpenAI (gpt-5.3-codex), Google (gemini-3-pro-preview)
 - Agent mode auto-enabled for qwen/glm/claude/codex/gemini; disabled for kimi
 - Search is Tavily-first by default (`SEARCH_BACKEND=tavily`)
@@ -163,6 +190,8 @@ See [`docs/assistant/path-index.md`](docs/assistant/path-index.md) for the full 
 Key entry points:
 
 - Backend gateway: `backend/gateway/app.py`
+- Auto-PM API/router: `backend/auto_pm/api.py`
+- Auto-PM worker: `auto_pm_worker.py`
 - Public facade: `backend/nvidia_client.py`
 - Provider routing: `backend/provider_router.py`
 - Frontend root: `frontend-react/src/App.jsx`
